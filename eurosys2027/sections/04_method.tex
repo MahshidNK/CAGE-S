@@ -1,0 +1,88 @@
+\section{Scheduler Design}\label{sec:method}
+\subsection{Prepare shared state once per timestamp}
+Policy masks are reusable while service requirements and node capabilities
+remain unchanged. For each timestamp, the scheduler constructs node features
+and batches model inference over the nodes required by the event batch.
+The resulting risk and headroom vectors are reused by individual events.
+Computing a risk score does not admit a node: policy remains a mandatory
+condition on every selected source or destination.
+
+The reported predictor uses 22 features covering current CPU and memory,
+projected values, joint utilization, headroom, two preceding snapshots,
+changes, and short-window statistics. These features use three consecutive
+snapshots ending at $t$. The feature families describe the predictor's inputs but do not fully
+specify its implementation. The serialized feature schema, individual
+feature formulas, and model hyperparameters are needed for exact
+reproduction and are not included with this draft.
+
+\subsection{Shortlist before final screening}
+For a source that fails admission, \cage orders $\mathcal B_e$
+lexicographically by $(H(n),g_{n,t},\operatorname{id}(n))$ and takes its
+first $k$ nodes. It then applies the risk and headroom screens to this
+shortlist. If none pass, it screens the remaining base candidates.
+Among accepted nodes it selects the minimum
+\begin{equation}\label{eq:ranking}
+\left(H(n),p_{n,t},g_{n,t},\operatorname{id}(n)\right).
+\end{equation}
+Thus, historical use is the primary ranking key, and predicted risk breaks
+ties in that key. The first shortlist is drawn from the policy-and-batch
+candidate set, not from $\Fset_e$. This distinction matters: shortlisting
+before screening can choose a different node from ranking all feasible
+nodes. Equality with full ranking is an empirical result for the reported
+workloads, not a general property of the algorithm.
+
+If all base candidates fail, the scheduler returns an infeasible decision.
+Search expansion guarantees that a candidate passing the fixed snapshot
+checks is not missed merely because it lies outside the initial shortlist.
+It does not guarantee that every event has a feasible destination.
+
+\subsection{Final check and state update}
+Algorithm~\ref{alg:scheduler} consolidates the decision path. Before
+recording a migration, the scheduler repeats the policy, risk, headroom,
+active-source, and reservation checks. A failed recheck cannot fall through
+to a committed decision. In the replay, telemetry is fixed within a batch
+and decisions are processed sequentially. A live controller would also need
+atomic resource reservation and a defined retry policy for changing state.
+
+\begin{algorithm}[t]
+\caption{Placement decisions for one timestamp}\label{alg:scheduler}
+\KwIn{Ordered events $\Eset_t$; policy masks; node snapshots; history $H$}
+Prepare $p_t,g_t$ once; form $A_t$; set $U_t\leftarrow0$\;
+\ForEach{$e=(i,s,n_s,t)\in\Eset_t$}{
+  $\pi(e)\leftarrow\varnothing$\;
+  \If{$L(s,n_s)=1$ and $p_{n_s,t}\leq\theta$ and $g_{n_s,t}\leq1$}{
+    $\pi(e)\leftarrow n_s$; $H(n_s)\leftarrow H(n_s)+1$\;
+    \textbf{continue}\;
+  }
+  Form $\mathcal B_e$ using Eq.~\eqref{eq:base}\;
+  $K\leftarrow$ first $k$ nodes by $(H,g,\operatorname{id})$\;
+  $D\leftarrow\{n\in K:p_{n,t}\leq\theta,\ g_{n,t}\leq1\}$\;
+  \If{$D=\varnothing$}{
+    $D\leftarrow\{n\in\mathcal B_e\setminus K:p_{n,t}\leq\theta,\ g_{n,t}\leq1\}$\;
+  }
+  \If{$D=\varnothing$}{\textbf{continue}\;}
+  $n^*\leftarrow$ minimum of $D$ by Eq.~\eqref{eq:ranking}\;
+  Recheck all conditions in Eq.~\eqref{eq:feasible} for $n^*$\;
+  \If{any recheck fails}{\textbf{continue}\;}
+  $U_t(n^*)\leftarrow U_t(n^*)+1$\;
+  $H(n^*)\leftarrow H(n^*)+1$; $\pi(e)\leftarrow n^*$\;
+}
+\Return{$\pi$}\;
+\end{algorithm}
+
+The decision procedure preserves its admission predicates under a fixed
+snapshot: retention tests all three source conditions, and migration is
+recorded only after every destination condition passes. This is a statement
+about the algorithm's checks. It says nothing about the accuracy of the
+predictor, the truth of supplied policy attributes, or future resource use.
+
+\subsection{Cost}
+For $R_t$ nodes requiring inference and a fixed trained model, feature
+construction and inference take $O(R_t)$ work. Building a candidate set is
+$O(M)$ per migrating event. A heap-based top-$k$ implementation can select
+the shortlist in $O(M\log k)$, then rank accepted candidates in $O(k)$;
+expansion adds an $O(M)$ scan. A full sort instead costs $O(M\log M)$.
+These are implementation bounds; timing results alone do not establish
+which selection primitive was used. State requires $O(M)$ space plus $O(PM)$ for $P$ policy masks.
+Shortlisting reduces candidate-ranking work, not the number of nodes whose
+features necessarily need to be constructed.

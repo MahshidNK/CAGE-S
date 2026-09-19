@@ -1,0 +1,66 @@
+\section{Introduction}\label{sec:introduction}
+A placement decision can be operationally attractive and still be
+unacceptable. A node with spare CPU may lie outside a service's permitted
+jurisdiction, lack encryption support, or fail an isolation requirement.
+Once these restrictions are enforced, a second problem remains: a node
+that looks lightly loaded now may be approaching a resource boundary.
+Moving a service there can exchange one problematic destination for
+another.
+
+This paper studies the decision procedure at that boundary between policy
+admission and resource management. We consider a controller that periodically
+reconsiders existing microservice placements. Its inputs are service
+requirements, node capabilities, and recent CPU and memory measurements.
+Its output is a decision to retain the current source, select a different
+node, or report that no candidate passes admission. The question is how to
+use temporal information without allowing a favorable resource score to
+override a mandatory policy condition.
+
+Hard filtering before scoring is established practice. Kubernetes, for
+example, separates filtering, scoring, reservation, and binding
+\citep{kubernetes2026}. We do not claim that this separation is new.
+Our focus is the interaction of source retention, a next-interval risk
+screen, destination-selection history, and a separate headroom rule in
+repeated placement decisions. This is narrower than solving general
+edge--cloud orchestration: we do not optimize service-graph latency,
+network traffic, or migration execution.
+
+\cage uses four checks with different purposes. A Boolean policy mask
+excludes prohibited nodes. A histogram gradient-boosting model uses recent
+node history to estimate whether CPU or memory will cross a fixed boundary
+in the next 30 seconds. Historical selection counts favor destinations
+that have been used less often. Finally, a persistence projection with
+empirical 95th-percentile residual margins checks headroom before a
+destination is recorded. The source is retained whenever it passes the
+policy, risk, and headroom conditions. Otherwise, the scheduler examines
+a bounded shortlist and expands the search if necessary.
+
+The distinction between prediction and admission matters. A probability
+below the risk threshold is a model decision, not a safety guarantee.
+Likewise, passing a headroom projection does not establish that a node can
+absorb the incoming service: the projection does not add that service's
+demand. These checks define the scheduler's decision contract. We evaluate
+both whether it obeys that contract and whether selected nodes subsequently
+look safer in the unmodified trace.
+
+Our evaluation replays CPU-burst events from Alibaba's 2021 microservice
+trace. Policy attributes are synthetic because the trace does not provide
+them. On the natural test workload, \cage reduces migration decisions by
+3.732 percentage points relative to a current-state learned baseline.
+Against a policy-and-headroom baseline, it instead requests 0.920
+percentage points more migrations, while the recorded next-state unsafe
+rate falls from 0.155\% to 0.043\%. These are different trade-offs, not
+evidence that one scheduler dominates all alternatives. The replay does
+not execute migrations or modify future telemetry.
+
+The paper makes three contributions:
+\begin{itemize}[leftmargin=*]
+\item A placement decision procedure that combines source retention,
+hard policy admission, temporal risk screening, destination-use history,
+and a separate empirical headroom check.
+\item A replay comparison that distinguishes compliance with configured
+checks from observed next-state behavior, including current-state and
+component-removal controls.
+\item An analysis of shortlist cost, policy-overlay sensitivity, and
+the limits of conclusions drawn from unmodified trace replay.
+\end{itemize}

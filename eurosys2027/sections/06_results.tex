@@ -1,0 +1,645 @@
+\section{Results}
+\label{sec:results}
+
+\subsection{Temporal node-risk prediction}
+
+We first examine whether short temporal histories improve the prediction
+of next-interval node risk. Table~\ref{tab:model-quality} compares the
+temporal histogram-gradient-boosting model with its current-state
+counterpart on the final held-out node transitions.
+
+\begin{table}[t]
+\centering
+\caption{Node-risk prediction on the final test transitions.}
+\label{tab:model-quality}
+\begin{tabular}{lrr}
+\toprule
+Metric &
+Current-state HGB &
+Temporal HGB \\
+\midrule
+ROC-AUC $\uparrow$ &
+0.996944 &
+\textbf{0.998248} \\
+
+PR-AUC $\uparrow$ &
+0.984894 &
+\textbf{0.990308} \\
+
+Brier score $\downarrow$ &
+0.009858 &
+\textbf{0.008578} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Both models achieve high discrimination, but the temporal representation
+improves every common test metric. The increase in PR-AUC is particularly
+relevant because unsafe transitions form the minority class. The lower
+Brier score further shows that temporal history improves the quality of
+the predicted probabilities, although it does not identify a separate probability-calibration procedure.
+For the temporal model, the final test log loss is 0.030480 and the
+expected calibration error is 0.000970. Table~\ref{tab:operating-points} compares the learned temporal screens
+with deterministic guardrail rules at closely matched acceptance levels.
+The default temporal operating point accepts 82.35\% of node transitions,
+which is close to the 82.11\% acceptance of the Q95 rule. Its unsafe rate
+among accepted nodes is 0.0571\%, compared with 0.1343\% for Q95, while
+retaining a slightly larger share of actually safe nodes. The same
+pattern appears at the stricter operating point: temporal screening
+achieves a lower unsafe rate than the deterministic 0.99 boundary at
+nearly identical acceptance.
+
+\begin{table*}[t]
+\centering
+\caption{Test-set operating-point comparison. Unsafe rate is measured
+among accepted node transitions; safe retention is the fraction of
+actually safe transitions retained by the rule.}
+\label{tab:operating-points}
+\begin{tabular}{llrrr}
+\toprule
+Screen &
+Threshold or cutoff &
+Acceptance (\%) &
+Unsafe among accepted (\%) &
+Safe retention (\%) \\
+\midrule
+Temporal availability &
+$0.011362695$ &
+82.349 &
+\textbf{0.0571} &
+\textbf{93.287} \\
+
+Q95 guardrail &
+$1.000$ &
+82.106 &
+0.1343 &
+92.939 \\
+
+Temporal safety &
+$0.002059431$ &
+75.714 &
+\textbf{0.0236} &
+85.799 \\
+
+Boundary guardrail &
+$0.990$ &
+75.819 &
+0.0617 &
+85.885 \\
+
+Strict Q95 guardrail &
+$0.975$ &
+62.960 &
+0.0311 &
+71.340 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+These results establish that temporal history contributes information
+that is not captured by current utilization or a fixed projected-headroom
+rule. The default temporal threshold is therefore used in the complete
+scheduler, while the deterministic Q95 rule remains as the final
+pre-commit verification stage.
+
+\subsection{Replay comparison on the natural workload}
+
+Table~\ref{tab:natural-results} presents the main comparison on the
+natural test workload of 11,629 events. The observed-source control
+illustrates the difficulty of retaining the native placements: 25.875\%
+of events remain on policy-inadmissible sources, 19.512\% exceed the
+temporal-risk threshold, and 19.451\% fail the Q95 condition. Enforcing policy alone removes policy violations but leaves substantial
+operational exposure. Policy-only-fair records temporal and Q95
+violation rates of 13.011\% and 13.019\%, respectively. Conversely,
+removing policy from the temporal scheduler preserves low operational
+risk but leaves 25.411\% policy violations. These two controls show that
+compliance and operational suitability address different requirements
+and neither can replace the other.
+
+\begin{table*}[t]
+\centering
+\caption{Replay results on the natural test workload
+(11,629 events). Rates and Top-10 are percentages; Jain is unitless. Risk means temporal-screen violation. Unsafe is the native next-state proxy. Short names refer to the controls
+in Section~\ref{sec:experimental}.}
+\label{tab:natural-results}
+
+\begin{tabular}{lrrrrrrr}
+\toprule
+Method &
+Migr. &
+Policy &
+Risk &
+Q95 &
+Unsafe &
+Jain &
+Top-10 \\
+\midrule
+Observed source &
+0.000 &
+25.875 &
+19.512 &
+19.451 &
+12.340 &
+-- &
+-- \\
+
+Random &
+38.198 &
+0.000 &
+1.392 &
+0.000 &
+0.190 &
+0.191 &
+1.353 \\
+
+Least-loaded &
+38.198 &
+0.000 &
+0.920 &
+0.000 &
+0.155 &
+0.009 &
+13.282 \\
+
+Policy-only-fair &
+25.875 &
+0.000 &
+13.011 &
+13.019 &
+7.215 &
+0.189 &
+0.665 \\
+
+Policy-Q95-fair &
+38.198 &
+0.000 &
+0.980 &
+0.000 &
+0.155 &
+0.291 &
+0.450 \\
+
+Boundary-0.99 &
+43.323 &
+0.000 &
+0.404 &
+0.000 &
+0.095 &
+\textbf{0.332} &
+\textbf{0.397} \\
+
+Current-HGB &
+42.850 &
+0.000 &
+0.370 &
+0.000 &
+0.069 &
+0.329 &
+0.401 \\
+
+No policy &
+20.741 &
+25.411 &
+0.000 &
+0.000 &
+0.060 &
+0.190 &
+0.415 \\
+
+No projection &
+38.189 &
+0.000 &
+0.000 &
+1.144 &
+\textbf{0.043} &
+0.290 &
+0.450 \\
+
+\cage &
+39.118 &
+\textbf{0.000} &
+\textbf{0.000} &
+\textbf{0.000} &
+\textbf{0.043} &
+0.299 &
+0.440 \\
+\bottomrule
+\end{tabular}
+
+\end{table*}
+
+The comparison with the current-state learned scheduler changes the
+feature set and the associated admission threshold. Current-HGB migrates 42.850\%
+of events and leaves a temporal-violation rate of 0.370\%. \cage reduces
+migration to 39.118\%, removes the remaining temporal violations, and
+reduces the next-state unsafe rate from 0.069\% to 0.043\%. The comparison with Policy-Q95-fair isolates the contribution of learned
+temporal screening. \cage increases migration by only 0.920 percentage
+points, while reducing the temporal-violation rate from 0.980\% to zero
+and the next-state unsafe rate from 0.155\% to 0.043\%. Finally, the no-projection ablation isolates the pre-commit guardrail.
+No projection already eliminates policy and temporal
+violations, but 1.144\% of its final selections fail the Q95 condition.
+Adding the pre-commit projection increases migration by 0.929 percentage
+points and removes these violations without increasing the next-state
+unsafe rate. The least-loaded baseline also demonstrates the importance of
+fairness-aware selection. Although it satisfies policy and Q95
+conditions, its migrated-destination Jain index is only 0.009 and its
+ten most-used nodes receive 13.282\% of all migrations. Under the same
+policy and Q95 conditions, Policy-Q95-fair increases Jain fairness to
+0.291 and reduces the top-ten share to 0.450\%.
+
+\subsection{Service-balanced workload}
+
+The service-balanced workload tests whether the main observations depend
+on the event concentration of a small number of services.
+Table~\ref{tab:balanced-results} reports the results for 3,787 test
+events.
+
+\begin{table*}[t]
+\centering
+\caption{Replay results on the service-balanced test workload
+(3,787 events). Rates and Top-10 are percentages; Jain is unitless. Risk means temporal-screen violation.}
+\label{tab:balanced-results}
+
+\begin{tabular}{lrrrrrrr}
+\toprule
+Method &
+Migr. &
+Policy &
+Risk &
+Q95 &
+Unsafe &
+Jain &
+Top-10 \\
+\midrule
+Observed source &
+0.000 &
+24.611 &
+21.917 &
+21.310 &
+13.890 &
+-- &
+-- \\
+
+Random &
+38.791 &
+0.000 &
+1.863 &
+0.000 &
+0.334 &
+0.094 &
+2.155 \\
+
+Least-loaded &
+38.791 &
+0.000 &
+1.400 &
+0.000 &
+0.290 &
+0.002 &
+39.959 \\
+
+Policy-only-fair &
+24.611 &
+0.000 &
+14.787 &
+14.180 &
+8.635 &
+0.073 &
+1.073 \\
+
+Policy-Q95-fair &
+38.791 &
+0.000 &
+1.400 &
+0.000 &
+0.290 &
+0.115 &
+0.681 \\
+
+Boundary-0.99 &
+43.623 &
+0.000 &
+0.528 &
+0.000 &
+0.158 &
+\textbf{0.130} &
+\textbf{0.605} \\
+
+Current-HGB &
+43.200 &
+0.000 &
+0.502 &
+0.000 &
+0.158 &
+0.129 &
+0.611 \\
+
+No policy &
+23.105 &
+24.399 &
+0.000 &
+0.000 &
+0.132 &
+0.069 &
+1.143 \\
+
+No projection &
+39.398 &
+0.000 &
+0.000 &
+0.792 &
+\textbf{0.106} &
+0.117 &
+0.670 \\
+
+\cage &
+40.190 &
+\textbf{0.000} &
+\textbf{0.000} &
+\textbf{0.000} &
+\textbf{0.106} &
+0.120 &
+0.657 \\
+\bottomrule
+\end{tabular}
+
+\end{table*}
+
+The balanced workload reproduces the natural-workload pattern. \cage
+passes all configured policy, temporal-risk, and Q95 checks with a migration
+rate of 40.190\% and a next-state unsafe rate of 0.106\%.
+Current-HGB migrates more events, at 43.200\%, while leaving
+0.502\% temporal violations. Policy-Q95-fair migrates slightly fewer
+events, at 38.791\%, but its temporal-violation and next-state unsafe
+rates increase to 1.400\% and 0.290\%, respectively. The fairness comparison becomes even more pronounced in this workload.
+Least-loaded concentrates 39.959\% of migrations on its ten
+most-used destinations and achieves a Jain index of only 0.002.
+Policy-Q95-fair reduces the top-ten share to 0.681\% and raises the Jain
+index to 0.115. \cage retains a similarly distributed assignment pattern
+while adding temporal screening and pre-commit verification.
+
+
+
+\subsection{Shortlist-size sensitivity}
+
+Table~\ref{tab:shortlist-sensitivity} reports the candidate-selection
+microbenchmark for fairness-aware shortlists. Full fairness-aware
+candidate evaluation requires 72.930~ms on average. Restricting the
+initial candidate set sharply reduces this cost.
+
+\begin{table}[t]
+\centering
+\caption{Mean fairness-aware candidate-selection latency on the natural
+workload. Feature construction and model inference are excluded from
+this isolated shortlist microbenchmark.}
+\label{tab:shortlist-sensitivity}
+\begin{tabular}{lr}
+\toprule
+Candidate setting & Mean latency (ms) \\
+\midrule
+$k=128$ & 4.182 \\
+$k=256$ & 4.724 \\
+$k=512$ & 5.754 \\
+$k=1024$ & 8.100 \\
+$k=2048$ & 12.517 \\
+Full candidate set & 72.930 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The $k=256$ configuration reproduces the full fairness-aware selections,
+requires no search expansion, and preserves a minimum accepted-candidate
+slack of 130 nodes on the natural workload and 229 nodes on the balanced
+workload. Its isolated shortlist latency has a P95 of 5.937~ms and a P99
+of 7.576~ms. The smaller $k=128$ setting is faster, but its minimum
+natural-workload slack falls to two candidates. \cage therefore uses
+$k=256$ as the default configuration.
+
+\subsection{Paired timestamp-cluster comparisons}
+
+Table~\ref{tab:bootstrap-results} reports the principal paired
+timestamp-cluster bootstrap comparisons. Differences are calculated as
+\cage minus the corresponding baseline. For migration and violation
+rates, an interval below zero favours \cage.
+
+\begin{table*}[t]
+\centering
+\caption{Selected paired timestamp-cluster bootstrap comparisons.
+Intervals are 95\% percentile confidence intervals based on 20,000
+bootstrap samples. Values are proportions.}
+\label{tab:bootstrap-results}
+\begin{tabular}{llrrr}
+\toprule
+Workload &
+Baseline and metric &
+Difference &
+CI low &
+CI high \\
+\midrule
+Natural &
+Current-HGB: migration &
+-0.037320 &
+-0.040806 &
+-0.033591 \\
+
+Natural &
+Current-HGB: temporal violation &
+-0.003698 &
+-0.005049 &
+-0.002499 \\
+
+Natural &
+Current-HGB: next-state unsafe &
+-0.000258 &
+-0.000574 &
+0.000000 \\
+
+Natural &
+Policy-Q95: migration &
+0.009201 &
+0.007527 &
+0.010939 \\
+
+Natural &
+Policy-Q95: temporal violation &
+-0.009803 &
+-0.011684 &
+-0.008022 \\
+
+Natural &
+Policy-Q95: next-state unsafe &
+-0.001118 &
+-0.001751 &
+-0.000571 \\
+
+Natural &
+No projection: migration &
+0.009287 &
+0.007350 &
+0.011482 \\
+
+Natural &
+No projection: Q95 violation &
+-0.011437 &
+-0.013933 &
+-0.009146 \\
+\midrule
+Balanced &
+Current-HGB: migration &
+-0.030103 &
+-0.035847 &
+-0.024455 \\
+
+Balanced &
+Current-HGB: temporal violation &
+-0.005017 &
+-0.007339 &
+-0.002936 \\
+
+Balanced &
+Policy-Q95: migration &
+0.013995 &
+0.010437 &
+0.017647 \\
+
+Balanced &
+Policy-Q95: temporal violation &
+-0.013995 &
+-0.017647 &
+-0.010437 \\
+
+Balanced &
+Policy-Q95: next-state unsafe &
+-0.001848 &
+-0.003484 &
+-0.000528 \\
+
+Balanced &
+No projection: migration &
+0.007922 &
+0.005424 &
+0.010571 \\
+
+Balanced &
+No projection: Q95 violation &
+-0.007922 &
+-0.010571 &
+-0.005424 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+Relative to the current-state learned scheduler, \cage achieves
+significantly lower migration and temporal-violation rates on both
+workloads. Relative to Policy-Q95-fair, it incurs a small and precisely
+estimated migration increase while significantly reducing temporal
+violations and the next-state unsafe rate. Relative to the no-projection
+ablation, the additional migration is accompanied by the complete removal
+of Q95 violations. The natural-workload next-state interval against Current-HGB includes
+zero; this comparison does not establish a strict improvement in that
+proxy at the reported confidence level. Temporal violations measure
+agreement with the temporal model, while the migration difference is an
+independent decision-count comparison.
+
+\subsection{Robustness across policy overlays}
+
+The integrated policy--temporal--projection scheduler is evaluated across
+30 deterministic policy overlays. Together, these runs contain 462,480
+decisions. Every selected destination satisfies the policy,
+temporal-risk, and Q95 conditions. No destination conflict, migration
+into another active source, fallback, or missing decision is observed.
+
+\begin{table*}[t]
+\centering
+\caption{Robustness across 30 deterministic policy overlays. Rates are
+percentages except for Jain fairness.}
+\label{tab:seed-robustness}
+\begin{tabular}{lrrrrrr}
+\toprule
+Workload &
+Migr. mean &
+Migr. P05 &
+Migr. P95 &
+Unsafe mean &
+Jain mean &
+Jain P05--P95 \\
+\midrule
+Natural &
+35.233 &
+30.150 &
+44.803 &
+0.0496 &
+0.3155 &
+0.2722--0.3948 \\
+
+Service-balanced &
+37.837 &
+34.927 &
+41.211 &
+0.1056 &
+0.1126 &
+0.1039--0.1226 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+For the natural workload, the mean migration rate is 35.233\%, with a
+5th--95th percentile range of 30.150--44.803\%. The mean next-state
+unsafe rate remains 0.0496\%. For the service-balanced workload, the
+corresponding values are 37.837\% and 0.1056\%. Variation in migration
+reflects changes in the policy-admissible sets produced by each overlay;
+the event sequence, temporal model, risk threshold, and guardrail
+parameters remain fixed.
+
+
+
+
+\subsection{Online decision latency}
+\label{sec:runtime}
+
+Table~\ref{tab:runtime-results} reports the latency of the complete
+in-memory online core. The measurement includes temporal feature
+construction, all required model inference, policy filtering,
+fairness-aware shortlisting, ranking, reservation updates, and
+pre-commit verification.
+
+
+
+\begin{table}[t]
+\centering
+\caption{Complete online-core latency in milliseconds.}
+\label{tab:runtime-results}
+\begin{tabular}{lrr}
+\toprule
+Statistic &
+Natural &
+Service-balanced \\
+\midrule
+Mean & 20.247 & 13.152 \\
+Median & 17.710 & 12.990 \\
+P95 & 32.081 & 16.229 \\
+P99 & 57.513 & 17.431 \\
+Maximum & 60.293 & 20.247 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The natural workload requires more computation because it contains more
+events per timestamp and produces a larger policy-constrained inference
+superset. Even its maximum observed online-core latency remains small
+relative to the 30-second control interval. The online feature implementation is also checked against the stored
+offline snapshots. The maximum feature difference is
+$2.22\times10^{-16}$, the maximum probability difference is zero, and
+no online placement decision differs from its stored replay reference.
+
+\subsection{Destination-capacity sensitivity}
+
+The main scheduler permits one new destination reservation per node and
+timestamp. Repeating the complete replay with capacity $C=2$ does not
+change any migration indicator. For the service-balanced workload, all 3,787 destinations remain
+identical to the $C=1$ decisions. For the natural workload, 11,617 of
+11,629 selected nodes remain identical, corresponding to a destination
+agreement of 99.897\%. The 12 changed destinations do not change the
+migration pattern, destination fairness, or any admission outcome. No node receives two assignments at the same timestamp under the
+$C=2$ setting. The observed event density therefore does not make the
+default capacity-one constraint an active placement bottleneck.

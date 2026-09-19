@@ -1,0 +1,175 @@
+\section{Evaluation Method}\label{sec:experimental}
+We ask whether temporal history changes migration decisions, what each
+admission component contributes, how destinations are distributed, and how
+much computation the decision procedure requires. We compare the complete
+procedure with component ablations under the same trace-replay protocol.
+
+\subsection{Trace and event workload}
+The study uses Alibaba Microservices Trace 2021
+\citep{luo2021alibaba,alibaba2021trace}, combining \texttt{Node\_0} with
+\texttt{MSResource\_0}. The full node archive contains 18,868,400 records,
+13,118 nodes, and 1,440 timestamps at 30-second intervals. Removing
+incomplete full trajectories gives 13,058 nodes. Local alignment with the
+clean microservice shard yields 12,727 nodes over 120 timestamps and
+1,527,240 node observations. The microservice shard contains 11,561,072
+clean records, 1,303 services, and 96,346 service--instance pairs.
+
+Instance CPU signals are used to trigger decisions, not to infer node
+capacity. After a 300-second warm-up, an event is emitted when the instance
+CPU signal increases by more than 0.05 over one interval. The rule produces
+20,419 events; excluding the last timestamp, whose outcome is unavailable,
+leaves 20,324 events over 108 timestamps. This is a constructed workload
+of placement reconsiderations, not a trace of new service arrivals.
+
+The natural workload preserves the observed service-frequency imbalance:
+its ten most frequent services account for approximately 46\% of events.
+A second workload retains at most two events per service per timestamp,
+using deterministic selection. It contains 6,875 events. The balanced test
+subset has a top-ten service share of 22.55\%. Both test workloads use the
+same 59 timestamps, so they are sensitivity views of the same trace rather
+than independent replications.
+
+\subsection{Information boundary and model selection}
+An event at $t$ uses the instance change ending at $t$. Its decision uses
+node observations at $t,t-\Delta,t-2\Delta$; evaluation reads the selected
+node's recorded state at $t+\Delta$. The replay leaves that future state
+unchanged. A later event still refers to the source recorded in the trace;
+the evaluation is not a closed-loop simulation of the resulting placements.
+
+The chronological split is at 1,800,000\,ms. The reported partitions are
+shown in Table~\ref{tab:partitions}. Model fitting uses development data;
+estimator selection and operating-point selection use the pre-test region.
+The final test region is reserved for evaluation. Exact split inequalities,
+label-boundary handling, and the provenance of projection features used
+during fitting must be recovered from the experiment code to audit this
+information boundary fully.
+
+\begin{table}[t]
+\centering
+\caption{Reported chronological partitions.}\label{tab:partitions}
+\begin{tabular}{lrr}
+\toprule
+Partition & Transitions & Natural events\\
+\midrule
+Development &432,718&--\\
+Validation &190,905&--\\
+Pre-test total &623,623&8,695\\
+Test &750,893&11,629\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The balanced pre-test and test subsets contain 3,088 and 3,787 events.
+The principal model is scikit-learn histogram gradient boosting
+\citep{pedregosa2011sklearn}. Its direct predictive control uses current
+telemetry without temporal lags or changes. Both use the same chronological
+partitions. Reported model metrics include ROC-AUC, PR-AUC, Brier score,
+log loss, and expected calibration error. A separate probability-calibration
+transform is not specified; a low calibration error alone does not identify
+such a transform.
+
+The temporal threshold is $0.011362695354780319$; the current-state
+threshold is $0.004292615073088162$. These were selected at matched
+pre-test operating points. A stricter temporal threshold,
+$0.0020594307448572016$, is used for sensitivity analysis. The empirical
+headroom margins are
+\begin{align}
+q_c&=0.025929729975254,\\
+q_m&=0.00021962105567108203.
+\end{align}
+The operating boundary is 0.8 for both resources. Deterministic headroom
+cutoffs of 1, 0.99, and 0.975 provide comparison points. The default
+shortlist size is $k=256$, compared with 128, 512, 1024, 2048, and full
+ranking. Reservation capacity is $C=1$, with $C=2$ as a sensitivity check.
+Settings were selected before final testing; the selection logs are not
+included with this draft.
+
+\subsection{Synthetic policy attributes}\label{sec:policyoverlay}
+The trace has no jurisdiction, trust, encryption, or isolation labels.
+The evaluation assigns them using a stable hash of identifiers and a policy
+seed, independently of resource telemetry. Nodes receive one of four
+jurisdictions, one of three trust ranks, and Boolean encryption and
+trusted-execution attributes. Services receive one of six policy classes.
+Under the reference seed, legal-node counts are 12,727 (global public),
+10,320 (global protected), 6,206 (EU restricted), 2,613 (US restricted),
+1,501 (APAC restricted), and 866 (EU confidential).
+
+Thirty deterministic overlays vary node capabilities and service
+requirements while retaining the trace and model. This tests behavior
+under the chosen policy generator, not compliance with actual Alibaba
+policies. In particular, the native source baseline can violate an overlay
+because that overlay was assigned after collection. These violations do
+not describe a production compliance failure.
+
+\subsection{Controls and ablations}
+All methods share events, event order, telemetry, and fixed tie breaking.
+Applicable methods also share the policy overlay, active-source exclusion,
+and reservation rules. Each method retains its source if that source passes
+its own admission rule. Consequently, comparisons measure both retention
+and destination choice.
+
+\begin{itemize}[leftmargin=*]
+\item \emph{Observed source} retains the trace source without admission.
+\item \emph{Random-policy-Q95} and \emph{Least-loaded-policy-Q95} enforce
+policy and headroom, then choose a random or minimally utilized node.
+Random selection is repeated with 20 deterministic seeds.
+\item \emph{Policy-only-fair} uses policy and selection history.
+\emph{Policy-Q95-fair} adds headroom; \emph{Policy-boundary-0.99} uses a
+stricter headroom cutoff.
+\item \emph{Policy-current-HGB-Q95} replaces temporal features with
+current-state learned risk.
+\item \emph{Temporal-Q95-no-policy} removes the policy gate;
+\emph{Policy-temporal-no-projection} removes the headroom check.
+\end{itemize}
+Together with \cage, these are ten methods, including the observed-source
+control. They are internal controls, not implementations of published
+orchestrators. No direct performance comparison with Kubernetes, NetMARKS,
+or another deployed scheduler is claimed.
+
+\subsection{Metrics and uncertainty}
+Migration rate counts decisions whose selected node differs from the
+recorded source. Policy, temporal, and Q95 violation rates count failures
+of $L(s,n)=1$, $p_{n,t}\leq\theta$, and $g_{n,t}\leq1$, respectively.
+The temporal metric applies \cage's temporal screen to all methods,
+including those optimized for another admission rule. It measures agreement
+with that screen and is not an independent measure of predictive quality.
+
+The native next-state unsafe rate averages $y_{n,t+\Delta}$ for selected
+nodes. It describes their unmodified recorded trajectories. It does not
+measure overload caused or prevented by migration. Search expansion and
+infeasible-event counts are reported separately; no infeasible decisions
+are reported in the evaluated configurations.
+
+For migrated-destination counts $z_n$, Jain's index is
+\begin{equation}
+J=\frac{(\sum_n z_n)^2}{M\sum_n z_n^2}.
+\end{equation}
+It includes nodes with zero assignments and measures destination spread,
+not fairness among tenants or services. For the no-migration control it is
+undefined; the tables mark it accordingly. Top-ten share is the fraction
+of migrations assigned to the ten most-used nodes.
+
+The paired timestamp-cluster bootstrap samples the 59 test timestamps
+with replacement and includes every event in each sampled timestamp.
+The same samples are applied to both methods. Random-baseline replicate
+identity is also sampled where applicable. Reported intervals are
+percentile 95\% intervals from 20,000 resamples of the difference
+\cage minus baseline. This preserves within-timestamp dependence but
+does not preserve correlation between adjacent timestamps or propagate
+uncertainty from fitting a different risk model.
+
+\subsection{Timing and artifact status}
+One latency sample is recorded per test timestamp. The in-memory path
+includes feature construction, all required model calls, filtering,
+shortlisting, ranking, reservations, and final checks. Telemetry collection,
+network and file I/O, serialization, binding, and migration execution are
+excluded. The reported platform is a Dell Precision 3561 running Ubuntu
+under WSL2 with Python 3.12.3. The exact CPU, memory allocation, thread
+settings, warm-up protocol, and repeat count are not specified, limiting
+reproducibility of the absolute timing results.
+
+The available package contains manuscript sources and rendered figures.
+It does not contain the preprocessing code, model, policy generator,
+replay implementation, environment lockfile, or raw measurements needed
+to reproduce these results. Artifact availability should therefore not be
+inferred from the public availability of the source trace.

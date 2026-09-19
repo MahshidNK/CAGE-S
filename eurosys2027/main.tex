@@ -1,0 +1,74 @@
+\documentclass[sigplan,10pt,anonymous,nonacm]{acmart}
+\settopmatter{printfolios=true,printacmref=false}
+\setcopyright{none}
+\acmConference[EuroSys '27]{EuroSys 2027}{April 19--23, 2027}{Rabat, Morocco}
+% The CFP dimensions take precedence over template defaults.
+\geometry{reset,letterpaper,textwidth=7in,textheight=9in,columnsep=0.34in,centering}
+\usepackage{amsmath,booktabs,tabularx,array,xspace}
+\usepackage[ruled,vlined]{algorithm2e}
+\usepackage{enumitem}
+\usepackage{adjustbox}
+\usepackage{threeparttable}
+\usepackage{placeins}
+\usepackage{capt-of}
+\usepackage{pifont}
+\newcommand{\cage}{\textsc{Sentry}\xspace}
+\newcommand{\N}{\mathcal{N}}
+\newcommand{\Sset}{\mathcal{S}}
+\newcommand{\Eset}{\mathcal{E}}
+\newcommand{\Lset}{\mathcal{L}}
+\newcommand{\Fset}{\mathcal{F}}
+\newcommand{\indicator}{\mathbb{I}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\yes}{\ding{51}}
+\newcommand{\no}{\ding{55}}
+\setlength{\emergencystretch}{2em}
+\captionsetup{font={normalsize},labelfont=bf}
+\AtBeginDocument{\fontsize{10}{12}\selectfont}
+\renewcommand{\footnotesize}{\fontsize{10}{12}\selectfont}
+\renewcommand{\small}{\fontsize{10}{12}\selectfont}
+\renewcommand{\scriptsize}{\fontsize{10}{12}\selectfont}
+\renewcommand{\bibfont}{\fontsize{10}{12}\selectfont}
+\microtypesetup{protrusion=false}
+\raggedbottom
+\title{Sentry: Separating Policy Admission from Predictive Microservice Placement}
+\author{Anonymous Author(s)}
+\begin{document}
+\begin{abstract}
+A microservice scheduler must sometimes reject a lightly loaded node because
+the service is not permitted to run there. Among permitted nodes, it must
+then decide whether to retain the current placement or move the service as
+resource pressure changes. We present \cage, a scheduler that separates
+policy admission, predicted node risk, destination reuse, and an empirical
+headroom check. It retains an admissible source and otherwise searches a
+shortlist ordered by previous selections, with a final admission check
+before recording a destination. We evaluate the decision procedure using
+Alibaba's 2021 microservice trace and synthetic policy attributes. On
+11,629 held-out events across 12,727 candidate nodes, it requests migration
+for 39.118\% of events, compared with 42.850\% for a current-state learned
+baseline. The selected nodes' recorded next-interval unsafe rate is
+0.043\%; this is an observational proxy, not an outcome of executed
+migrations. Across 30 policy overlays, all 462,480 decisions pass the
+configured admission checks. Mean in-memory processing time is 20.247\,ms
+per natural-workload timestamp. The results identify a migration--risk
+trade-off within replay; they do not establish application latency,
+post-placement capacity, or production safety.
+\end{abstract}
+\maketitle
+\pagestyle{plain}
+\input{sections/01_introduction}
+\input{sections/03_system_model}
+\input{sections/04_method}
+\input{sections/05_experimental_design}
+\input{sections/06_results}
+\input{sections/02_related_work}
+\input{sections/08_discussion}
+\input{sections/09_conclusion}
+\paragraph{AI assistance disclosure.}
+OpenAI Codex assisted with restructuring and editing the manuscript,
+checking internal consistency, and preparing its LaTeX layout. This
+assistance did not execute the scheduling experiments or independently
+validate their reported measurements.
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{references}
+\end{document}

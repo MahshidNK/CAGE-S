@@ -1,0 +1,9 @@
+qa/
+build.txt
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.fls
+*.fdb_latexmk

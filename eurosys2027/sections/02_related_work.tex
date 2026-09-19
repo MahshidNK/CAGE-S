@@ -1,0 +1,36 @@
+\section{Related Work}\label{sec:related}
+\paragraph{Admission and placement.}
+Kubernetes already separates candidate filtering from scoring and provides
+reservation and pre-bind extension points \citep{kubernetes2026}.
+\cage builds on this separation conceptually; its distinct question is how
+temporal node risk and source retention interact under a fixed policy mask.
+Pallewatta and Babar describe policy-as-code management of edge--cloud
+microservices \citep{pallewatta2024policy}. Thijsman et al. study remotely
+attested Kubernetes workers \citep{thijsman2024attested}. Such mechanisms
+can supply policy and trust decisions. A synthetic Boolean attribute in
+our replay does not substitute for their enforcement or attestation work.
+
+\paragraph{Resource and performance management.}
+NetMARKS uses service-mesh communication metrics for placement
+\citep{wojciechowski2021netmarks}. KaiS studies collaborative scheduling in
+Kubernetes-oriented edge--cloud networks \citep{shen2023kais}. These systems
+motivate richer placement objectives than node utilization alone. Our
+evaluation does not model communication costs, so it cannot establish an
+advantage over them on their objectives.
+
+FIRM addresses SLO-oriented resource management \citep{qiu2020firm}; Sage
+studies performance debugging \citep{gan2021sage}; and Sinan uses data to
+manage microservice resources under QoS constraints \citep{zhang2021sinan}.
+Temporal information is therefore not itself a novel resource-management
+technique. Here it predicts a specific node-utilization event and controls
+retention or destination admission. That target is more limited than
+end-to-end QoS.
+
+\paragraph{Fairness and empirical margins.}
+Madej et al. examine priority-based fair edge scheduling
+\citep{madej2020fair}. We instead count destination selections and report
+their spread using Jain's index \citep{jain1984fairness}. This does not imply
+fairness in useful work or user service quality. Likewise, the Q95 margin
+is a simple empirical persistence-residual rule, not a new uncertainty
+estimator. The contribution evaluated here is the behavior of these
+components together, with ablations that expose their costs and limits.

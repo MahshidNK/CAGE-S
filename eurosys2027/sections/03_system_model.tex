@@ -1,0 +1,67 @@
+\section{Decision Model}\label{sec:model}
+At each timestamp $t$, separated by $\Delta=30$ seconds, the scheduler
+receives an ordered batch $\Eset_t$ of events $e=(i,s,n_s,t)$ identifying
+an instance, its service, and its recorded source node. There are $M$
+candidate nodes in $\N$. Node CPU and memory observations are denoted
+$c_{n,t}$ and $m_{n,t}$; admission uses normalized node telemetry, not
+instance-level resource signals.
+
+\subsection{Policy and risk}
+Node $n$ has jurisdiction $j_n$, trust rank $\tau_n$, encryption capability
+$\eta_n$, and isolation capability $\zeta_n$. Service $s$ specifies
+permitted jurisdictions $J_s$ and minimum capability values. Its policy
+predicate is
+\begin{equation}\label{eq:legal}
+\begin{split}
+L(s,n)={}&\indicator[j_n\in J_s]\indicator[\tau_n\geq\tau_s^{\min}]\\
+&\cdot\indicator[\eta_n\geq\eta_s^{\min}]
+\indicator[\zeta_n\geq\zeta_s^{\min}].
+\end{split}
+\end{equation}
+The policy mask is an input to scheduling. The scheduler does not verify
+jurisdictions or produce hardware attestations; a deployment would need
+trusted mechanisms to supply and refresh these attributes.
+
+The prediction target is a node's recorded threshold crossing:
+\begin{equation}\label{eq:unsafe}
+y_{n,t+\Delta}=\indicator[c_{n,t+\Delta}>0.8\lor m_{n,t+\Delta}>0.8].
+\end{equation}
+The learned score $p_{n,t}=f_{\phi}(\mathbf h_{n,t})$ estimates this target
+from observations ending at $t$. A node passes the risk screen when
+$p_{n,t}\leq\theta$. Threshold violations below refer to this configured
+screen, not to actual service-level objective violations.
+
+\subsection{Empirical headroom}
+For pre-test calibration transitions $\mathcal C$, define the margins
+\begin{equation}
+q_x=Q_{0.95}\{|x_{n,t+\Delta}-x_{n,t}|:(n,t)\in\mathcal C\},
+\end{equation}
+for $x\in\{c,m\}$. The headroom score is
+\begin{equation}\label{eq:guardrail}
+g_{n,t}=\max\{(c_{n,t}+q_c)/0.8,(m_{n,t}+q_m)/0.8\}.
+\end{equation}
+Admission requires $g_{n,t}\leq1$. Q95 denotes the marginal empirical
+residual percentile; it is not a joint 95\% CPU-and-memory guarantee.
+The calculation excludes incoming service demand, interference, and
+migration transients. We therefore call it a headroom check rather than
+a certificate of post-placement feasibility.
+
+\subsection{Batch state and admissibility}
+Let $A_t$ contain every source node in the current event batch. Let
+$U_t(n)$ count new destination reservations during that batch, with
+limit $C$, and let $H(n)$ count earlier committed decisions across
+timestamps, including source retention. Counters are updated after each
+decision; $U_t$ is reset at the next timestamp.
+
+A source is retained exactly when $L(s,n_s)=1$, $p_{n_s,t}\leq\theta$,
+and $g_{n_s,t}\leq1$. Otherwise the base candidate set is
+\begin{equation}\label{eq:base}
+\mathcal B_e=\{n:L(s,n)=1,\ n\notin A_t,\ U_t(n)<C\}.
+\end{equation}
+The full feasible set additionally requires the risk and headroom checks:
+\begin{equation}\label{eq:feasible}
+\Fset_e=\{n\in\mathcal B_e:p_{n,t}\leq\theta,\ g_{n,t}\leq1\}.
+\end{equation}
+The reservation limit counts decisions; it does not reserve CPU or memory
+bytes. Excluding $A_t$ avoids choosing another active source in the same
+batch. Neither rule models concurrent migration execution.
