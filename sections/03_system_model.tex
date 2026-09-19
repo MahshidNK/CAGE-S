@@ -1,387 +1,67 @@
-\section{System Model and Problem Formulation}
-\label{sec:model}
+\section{Decision Model}\label{sec:model}
+At each timestamp $t$, separated by $\Delta=30$ seconds, the scheduler
+receives an ordered batch $\Eset_t$ of events $e=(i,s,n_s,t)$ identifying
+an instance, its service, and its recorded source node. There are $M$
+candidate nodes in $\N$. Node CPU and memory observations are denoted
+$c_{n,t}$ and $m_{n,t}$; admission uses normalized node telemetry, not
+instance-level resource signals.
 
-\subsection{Scheduling environment and decision events}
-
-We consider an edge--fog--cloud infrastructure composed of a set of
-heterogeneous computing nodes
-\begin{equation}
-    \N=\{n_1,n_2,\ldots,n_M\},
-\end{equation}
-and a set of microservices
-\begin{equation}
-    \Sset=\{s_1,s_2,\ldots,s_Q\}.
-\end{equation}
-A microservice may have one or more running instances. Let
-$\mathcal{I}$ denote the set of instances and let
-$\sigma(i)\in\Sset$ identify the microservice to which instance $i$
-belongs.
-
-Scheduling decisions are made at discrete control timestamps
-$t\in\mathcal{T}$ separated by an interval $\Delta$. In the trace-based
-evaluation, $\Delta=30$ seconds. At timestamp $t$, the scheduler receives
-a batch of decision events
-\begin{equation}
-    \Eset_t=\{e_{t,1},e_{t,2},\ldots,e_{t,B_t}\},
-\end{equation}
-where
-\begin{equation}
-    e_{t,r}=(i_{t,r},s_{t,r},n_{t,r},t)
-\end{equation}
-represents instance $i_{t,r}$ of microservice $s_{t,r}$ currently
-located on source node $n_{t,r}$. Multiple events may occur at the same
-timestamp. To make the scheduling process deterministic, events within
-each batch are processed according to a fixed event identifier.
-
-Each node $n$ exposes a normalized operational state
-\begin{equation}
-\label{eq:node-state}
-    \mathbf{x}_{n,t}
-    =
-    \begin{bmatrix}
-        c_{n,t} & m_{n,t}
-    \end{bmatrix},
-    \qquad
-    c_{n,t},m_{n,t}\in[0,1],
-\end{equation}
-where $c_{n,t}$ and $m_{n,t}$ denote the observed CPU and memory
-utilization at decision time $t$. Only information available at or
-before $t$ may be used when constructing a scheduling decision.
-
-In addition to its operational state, each node has a capability profile
-\begin{equation}
-\label{eq:node-capability}
-    \mathbf{a}_n
-    =
-    \left(
-        j_n,\tau_n,\eta_n,\zeta_n
-    \right),
-\end{equation}
-where $j_n$ denotes the node jurisdiction, $\tau_n$ its trust rank,
-$\eta_n\in\{0,1\}$ the availability of the required encryption
-capability, and $\zeta_n\in\{0,1\}$ the availability of trusted execution
-or hardware-backed isolation.
-
-Each microservice $s$ is associated with a requirement profile
-\begin{equation}
-\label{eq:service-requirement}
-    \mathbf{r}_s
-    =
-    \left(
-        J_s,
-        \tau_s^{\min},
-        \eta_s^{\min},
-        \zeta_s^{\min}
-    \right),
-\end{equation}
-where $J_s$ is the set of permitted jurisdictions,
-$\tau_s^{\min}$ is the minimum acceptable trust rank, and
-$\eta_s^{\min}$ and $\zeta_s^{\min}$ specify whether encryption and
-trusted execution are mandatory.
-
-The policy-admissibility predicate is defined as
-\begin{equation}
-\label{eq:legal}
+\subsection{Policy and risk}
+Node $n$ has jurisdiction $j_n$, trust rank $\tau_n$, encryption capability
+$\eta_n$, and isolation capability $\zeta_n$. Service $s$ specifies
+permitted jurisdictions $J_s$ and minimum capability values. Its policy
+predicate is
+\begin{equation}\label{eq:legal}
 \begin{split}
-    L(s,n)
-    ={}&
-    \indicator[j_n\in J_s]\,
-    \indicator[\tau_n\geq\tau_s^{\min}]\\
-    &{}\times
-    \indicator[\eta_n\geq\eta_s^{\min}]\,
-    \indicator[\zeta_n\geq\zeta_s^{\min}].
+L(s,n)={}&\indicator[j_n\in J_s]\indicator[\tau_n\geq\tau_s^{\min}]\\
+&\cdot\indicator[\eta_n\geq\eta_s^{\min}]
+\indicator[\zeta_n\geq\zeta_s^{\min}].
 \end{split}
 \end{equation}
-Accordingly, the policy-admissible node set for service $s$ is
-\begin{equation}
-\label{eq:legal-set}
-    \Lset_s
-    =
-    \{n\in\N:L(s,n)=1\}.
+The policy mask is an input to scheduling. The scheduler does not verify
+jurisdictions or produce hardware attestations; a deployment would need
+trusted mechanisms to supply and refresh these attributes.
+
+The prediction target is a node's recorded threshold crossing:
+\begin{equation}\label{eq:unsafe}
+y_{n,t+\Delta}=\indicator[c_{n,t+\Delta}>0.8\lor m_{n,t+\Delta}>0.8].
 \end{equation}
-Nodes outside $\Lset_s$ are excluded before any operational scoring or
-ranking is performed.
+The learned score $p_{n,t}=f_{\phi}(\mathbf h_{n,t})$ estimates this target
+from observations ending at $t$. A node passes the risk screen when
+$p_{n,t}\leq\theta$. Threshold violations below refer to this configured
+screen, not to actual service-level objective violations.
 
-\subsection{Near-term operational risk}
-
-Current utilization alone does not indicate whether a node is stable,
-recovering, or moving towards overload. We therefore define an
-operational-risk target over the next control interval.
-
-Let $\rho_c$ and $\rho_m$ denote the CPU and memory operating
-boundaries. In this work,
+\subsection{Empirical headroom}
+For pre-test calibration transitions $\mathcal C$, define the margins
 \begin{equation}
-    \rho_c=\rho_m=0.8,
+q_x=Q_{0.95}\{|x_{n,t+\Delta}-x_{n,t}|:(n,t)\in\mathcal C\},
 \end{equation}
-which reserves operational headroom before full saturation. A node is
-labelled unsafe at the next control timestamp when either resource
-crosses its boundary:
-\begin{equation}
-\label{eq:unsafe}
-    y_{n,t+\Delta}
-    =
-    \indicator
-    \left[
-        c_{n,t+\Delta}>\rho_c
-        \;\lor\;
-        m_{n,t+\Delta}>\rho_m
-    \right].
+for $x\in\{c,m\}$. The headroom score is
+\begin{equation}\label{eq:guardrail}
+g_{n,t}=\max\{(c_{n,t}+q_c)/0.8,(m_{n,t}+q_m)/0.8\}.
 \end{equation}
+Admission requires $g_{n,t}\leq1$. Q95 denotes the marginal empirical
+residual percentile; it is not a joint 95\% CPU-and-memory guarantee.
+The calculation excludes incoming service demand, interference, and
+migration transients. We therefore call it a headroom check rather than
+a certificate of post-placement feasibility.
 
-Let $\mathbf{h}_{n,t}$ denote the temporal feature representation of
-node $n$ at time $t$. It is constructed exclusively from current and
-past observations and contains the current resource levels, two lagged
-states, first- and second-order changes, short-window means and ranges,
-recent variation, and projected-headroom features. The temporal-risk
-model estimates
-\begin{equation}
-\label{eq:risk}
-    p_{n,t}
-    =
-    \Pr
-    \left(
-        y_{n,t+\Delta}=1
-        \mid
-        \mathbf{h}_{n,t}
-    \right).
+\subsection{Batch state and admissibility}
+Let $A_t$ contain every source node in the current event batch. Let
+$U_t(n)$ count new destination reservations during that batch, with
+limit $C$, and let $H(n)$ count earlier committed decisions across
+timestamps, including source retention. Counters are updated after each
+decision; $U_t$ is reset at the next timestamp.
+
+A source is retained exactly when $L(s,n_s)=1$, $p_{n_s,t}\leq\theta$,
+and $g_{n_s,t}\leq1$. Otherwise the base candidate set is
+\begin{equation}\label{eq:base}
+\mathcal B_e=\{n:L(s,n)=1,\ n\notin A_t,\ U_t(n)<C\}.
 \end{equation}
-
-A node passes the temporal-risk screen when
-\begin{equation}
-\label{eq:risk-acceptance}
-    p_{n,t}\leq\theta,
+The full feasible set additionally requires the risk and headroom checks:
+\begin{equation}\label{eq:feasible}
+\Fset_e=\{n\in\mathcal B_e:p_{n,t}\leq\theta,\ g_{n,t}\leq1\}.
 \end{equation}
-where $\theta$ is selected using calibration data and remains fixed
-during evaluation. The resulting temporally admissible set is
-\begin{equation}
-\label{eq:temporal-set}
-    \mathcal{R}_t
-    =
-    \{n\in\N:p_{n,t}\leq\theta\}.
-\end{equation}
-
-\subsection{Calibrated pre-commit guardrail}
-
-The temporal model estimates the probability of near-term threshold
-crossing. A separate pre-commit guardrail verifies whether sufficient
-resource headroom remains under a transparent one-step projection.
-
-Let $\mathcal{C}$ denote the calibration-transition set. For CPU and
-memory, the one-step persistence residuals are defined as
-\begin{align}
-\label{eq:cpu-residual}
-    r^{c}_{n,t}
-    &=
-    \left|
-        c_{n,t+\Delta}-c_{n,t}
-    \right|,\\
-\label{eq:memory-residual}
-    r^{m}_{n,t}
-    &=
-    \left|
-        m_{n,t+\Delta}-m_{n,t}
-    \right|.
-\end{align}
-The calibration margins are obtained from their empirical
-95th percentiles:
-\begin{align}
-\label{eq:q95-cpu}
-    q_c^{0.95}
-    &=
-    Q_{0.95}
-    \left(
-        \{r^c_{n,t}:(n,t)\in\mathcal{C}\}
-    \right),\\
-\label{eq:q95-memory}
-    q_m^{0.95}
-    &=
-    Q_{0.95}
-    \left(
-        \{r^m_{n,t}:(n,t)\in\mathcal{C}\}
-    \right).
-\end{align}
-
-The corresponding upper resource projections are
-\begin{align}
-\label{eq:cpu-upper}
-    \widehat{c}^{\,\mathrm{up}}_{n,t+\Delta}
-    &=
-    c_{n,t}+q_c^{0.95},\\
-\label{eq:memory-upper}
-    \widehat{m}^{\,\mathrm{up}}_{n,t+\Delta}
-    &=
-    m_{n,t}+q_m^{0.95}.
-\end{align}
-We define the normalized guardrail utilization as
-\begin{equation}
-\label{eq:guardrail}
-    g_{n,t}
-    =
-    \max
-    \left\{
-        \frac{
-            \widehat{c}^{\,\mathrm{up}}_{n,t+\Delta}
-        }{\rho_c},
-        \frac{
-            \widehat{m}^{\,\mathrm{up}}_{n,t+\Delta}
-        }{\rho_m}
-    \right\}.
-\end{equation}
-A node passes the pre-commit guardrail when
-\begin{equation}
-\label{eq:q95-executable}
-    g_{n,t}\leq 1.
-\end{equation}
-The associated guardrail-admissible set is
-\begin{equation}
-\label{eq:guardrail-set}
-    \mathcal{G}_t
-    =
-    \{n\in\N:g_{n,t}\leq1\}.
-\end{equation}
-
-The temporal-risk model and the pre-commit guardrail are intentionally
-kept separate. The former uses recent resource dynamics to estimate a
-probability of near-term threshold crossing, whereas the latter applies
-an explicit calibrated headroom condition immediately before commitment.
-
-\subsection{Simultaneous-event and reservation constraints}
-
-Let
-\begin{equation}
-\label{eq:active-source-set}
-    A_t
-    =
-    \{n_{t,r}:e_{t,r}\in\Eset_t\}
-\end{equation}
-denote the set of nodes that host an active source event at timestamp
-$t$. When an event requires migration, nodes in $A_t$ are not considered
-as destinations. This prevents one event in a simultaneous batch from
-being migrated onto the source node of another active event.
-
-Events at timestamp $t$ are processed sequentially in their fixed order.
-Let $U_{t,r}(n)$ denote the number of destination reservations assigned
-to node $n$ before processing event $e_{t,r}$. A node may accept at most
-$C$ new reservations within the same timestamp:
-\begin{equation}
-\label{eq:reservation-capacity}
-    U_{t,r}(n)<C.
-\end{equation}
-After a destination is committed, its reservation count is updated
-before the next event in the batch is processed.
-
-The source node of event $e_{t,r}$ is retained when it satisfies all
-three admission conditions:
-\begin{equation}
-\label{eq:retain-source}
-\begin{split}
-    R(e_{t,r})
-    ={}&
-    L(s_{t,r},n_{t,r})\\
-    &{}\times
-    \indicator[p_{n_{t,r},t}\leq\theta]\,
-    \indicator[g_{n_{t,r},t}\leq1].
-\end{split}
-\end{equation}
-If $R(e_{t,r})=1$, no migration is required.
-
-Otherwise, the feasible migration set is
-\begin{equation}
-\label{eq:feasible}
-\begin{split}
-    \Fset_{t,r}
-    =
-    \big\{
-        n\in\N:
-        &\;L(s_{t,r},n)=1,\\
-        &\;p_{n,t}\leq\theta,\\
-        &\;g_{n,t}\leq1,\\
-        &\;n\notin A_t,\\
-        &\;U_{t,r}(n)<C
-    \big\}.
-\end{split}
-\end{equation}
-
-Thus, policy admissibility, temporal-risk acceptance, pre-commit
-headroom, active-source exclusion, and reservation capacity are enforced
-as hard conditions rather than components of a weighted objective. If
-$\Fset_{t,r}$ is empty, the scheduler reports the event as infeasible and
-does not commit a constraint-violating destination.
-
-\subsection{Fairness-aware shortlisting}
-
-Let $H_{t,r}(n)$ denote the cumulative number of earlier scheduling
-decisions assigned to node $n$ before event $e_{t,r}$. The count includes
-all decisions made at earlier timestamps and all preceding decisions
-within the current timestamp. It is updated after every committed
-selection.
-
-Evaluating and ranking every feasible node for every event is
-unnecessary when the infrastructure contains thousands of candidates.
-CAGE-S therefore constructs a shortlist
-\begin{equation}
-\label{eq:shortlist}
-    K_{t,r}
-    =
-    \operatorname{TopK}_{k}
-    \left(
-        \Fset_{t,r};
-        H_{t,r}(n),
-        g_{n,t},
-        \operatorname{id}(n)
-    \right),
-\end{equation}
-where candidates are ordered lexicographically by historical selection
-count, guardrail utilization, and a fixed node identifier. The first
-$k$ candidates form the shortlist. This step favours less frequently
-selected nodes while retaining deterministic behaviour.
-
-If fewer than $k$ feasible nodes exist, all nodes in $\Fset_{t,r}$ are
-retained. If no acceptable destination is found in an initially examined
-shortlist, the search is expanded to the remaining nodes in
-$\Fset_{t,r}$ before infeasibility is reported.
-
-\subsection{Lexicographic placement objective}
-
-For an event whose source cannot be retained, the destination is selected
-from $K_{t,r}$ according to
-\begin{equation}
-\label{eq:lexicographic}
-    n_{t,r}^{*}
-    =
-    \operatorname*{lexmin}_{n\in K_{t,r}}
-    \left(
-        H_{t,r}(n),
-        p_{n,t},
-        g_{n,t},
-        \operatorname{id}(n)
-    \right).
-\end{equation}
-The historical count is the primary ranking key, followed by predicted
-temporal risk and projected guardrail utilization. The fixed node
-identifier resolves exact ties and ensures deterministic replay.
-
-The scheduling decision for event $e_{t,r}$ is therefore
-\begin{equation}
-\label{eq:complete-decision}
-    \pi(e_{t,r})
-    =
-    \begin{cases}
-        n_{t,r},
-        & R(e_{t,r})=1,\\[2mm]
-        n_{t,r}^{*},
-        & R(e_{t,r})=0
-          \text{ and }
-          \Fset_{t,r}\neq\varnothing,\\[2mm]
-        \varnothing,
-        & \Fset_{t,r}=\varnothing,
-    \end{cases}
-\end{equation}
-where $\varnothing$ denotes a deferred or infeasible decision.
-
-The formulation is lexicographic rather than additive. Mandatory
-compliance and executability conditions first determine which actions
-are admissible. Historical usage, temporal risk, and projected headroom
-then determine the preferred action within that admissible set. As a
-result, a favourable operational score cannot compensate for a failed
-policy or pre-commit condition.
+The reservation limit counts decisions; it does not reserve CPU or memory
+bytes. Excluding $A_t$ avoids choosing another active source in the same
+batch. Neither rule models concurrent migration execution.
