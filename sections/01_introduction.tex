@@ -1,0 +1,161 @@
+\section{Introduction}\label{sec:introduction}
+
+Internet-of-Things (IoT) applications are increasingly built as collections
+of microservices distributed across edge, fog, and cloud resources. This
+architecture allows sensing, data preparation, inference, storage, and
+control functions to scale and evolve independently. It also enables
+latency-sensitive processing to remain close to devices while
+compute-intensive services use elastic cloud capacity. The same flexibility,
+however, makes scheduling considerably more difficult. An edge--cloud
+scheduler must choose among heterogeneous nodes that differ not only in
+available CPU and memory, but also in administrative domain, geographical
+jurisdiction, trust level, encryption support, and hardware-isolation
+capability.
+
+These differences are particularly important for services that process
+sensitive, regulated, or operationally critical data. For such services,
+placement cannot be reduced to finding the node with the lowest load or
+highest expected performance. A candidate node may offer excellent
+performance but violate a data-residency rule. Another node may satisfy the
+required jurisdiction but lack the necessary trust or isolation capability.
+A third node may satisfy all policy requirements while exhibiting a rapidly
+increasing workload that makes it a poor operational choice. The scheduling
+decision must therefore answer several distinct questions: whether a node is
+allowed to host the service, whether it is likely to remain operationally
+suitable, whether sufficient headroom exists at commitment time, and which
+eligible destination should be selected without repeatedly concentrating
+decisions on the same small subset of nodes.
+
+Most existing microservice schedulers primarily address the performance side
+of this problem. Learning-based frameworks coordinate request dispatch and
+service orchestration across heterogeneous edge--cloud infrastructures
+\citep{shen2023kais}. Network-aware schedulers reduce communication overhead
+by considering service dependencies, traffic intensity, or inter-node delay
+\citep{chen2026trade}. Telemetry-driven controllers localize resource
+contention, respond to service-level objective violations, and adapt resource
+allocation or replica counts under changing workloads
+\citep{qiu2020firm,gan2021sage,wen2024statuscale}. These approaches provide
+important mechanisms for improving throughput, latency, and resource
+efficiency, but their primary objective remains operational performance.
+
+A parallel line of research focuses on whether distributed services and
+worker nodes can be trusted. Policy-as-Code frameworks express and enforce
+security requirements during placement, scaling, and migration
+\citep{pallewatta2024policy}. Remote-attestation mechanisms establish a
+hardware-rooted basis for admitting edge devices into cloud-native clusters
+and for dynamically controlling their privileges
+\citep{thijsman2024attested}. These mechanisms strengthen security and
+governance, but they do not by themselves determine which legal node is the
+best operational destination under rapidly changing resource conditions.
+
+The separation between these two lines of work leaves an important practical
+gap. Performance-oriented scheduling may rank a prohibited node highly,
+whereas policy enforcement may identify the legal set without distinguishing
+between stable and deteriorating destinations. Treating policy requirements
+as finite penalties inside a weighted objective does not fully resolve this
+gap. When legality is represented as another cost term, a sufficiently
+attractive performance score may compensate for the penalty. Similarly,
+ranking all nodes first and filtering prohibited destinations afterwards
+mixes candidates that can be committed with candidates that should never have
+entered the decision process.
+
+For sensitive microservices, legality must instead define the feasible
+decision space. A node that violates a mandatory jurisdiction, trust,
+encryption, or isolation requirement should be excluded before any
+performance comparison is performed. This legality-first principle gives
+policy constraints a different role from optimization objectives: policy
+determines which decisions are admissible, while optimization determines
+which admissible decision is preferable.
+
+Even within the legal candidate set, current utilization alone provides an
+incomplete view of operational suitability. Two nodes can report the same CPU
+and memory utilization at the decision instant while following very different
+trajectories. A stable node and a node whose utilization has increased
+sharply over recent intervals should not receive the same risk assessment.
+Scheduling from a single telemetry snapshot therefore reacts only after
+pressure becomes visible at the current instant. Short temporal histories,
+including recent levels, changes, ranges, and variability, provide the
+scheduler with information about the direction and persistence of the node
+state.
+
+Prediction alone is also insufficient. A risk model estimates the likelihood
+of a near-term threshold crossing, but the selected destination must still
+satisfy a transparent resource-headroom check immediately before commitment.
+The two mechanisms serve complementary purposes: temporal prediction
+distinguishes stable candidates from deteriorating ones, whereas a
+pre-commit guardrail prevents a destination with insufficient projected
+headroom from being selected. Keeping these roles separate avoids relying on
+a single opaque score for both forecasting and executability.
+
+Another challenge arises when multiple scheduling decisions are processed
+within the same control interval. Repeatedly choosing the node with the
+smallest predicted risk can concentrate placements on a few apparently
+attractive destinations. Such concentration reduces placement diversity and
+can create the next resource hotspot. Evaluating a large global fairness
+objective for every event would introduce unnecessary overhead. A more
+practical approach is to use historical selection counts to construct a
+compact, fairness-aware shortlist and then apply operational ranking only
+within that shortlist.
+
+This paper presents \cage, a Compliance-Aware Guardrail-Enforced Scheduler
+for sensitive edge--cloud microservices. \cage organizes scheduling as a
+sequence of non-interchangeable decisions. First, a deterministic policy gate
+constructs the legal candidate set from the service requirements and node
+capabilities. Second, a calibrated temporal-risk model removes legal nodes
+that are likely to cross the operational utilization boundary in the next
+control interval. Third, a fairness-aware shortlist gives priority to
+destinations that have not been repeatedly selected while retaining
+operationally strong candidates. Finally, an empirical Q95 projection verifies
+CPU and memory headroom before the destination is committed.
+
+The central idea of \cage is therefore not to add policy, risk, fairness, and
+capacity as competing terms in a single weighted objective. Instead, the
+scheduler assigns each concern a precise role and places it at the appropriate
+stage of the decision path. Mandatory policy requirements define
+admissibility; temporal telemetry estimates near-term operational risk;
+selection history controls concentration; and the pre-commit projection
+checks immediate executability. This ordered design makes each decision
+interpretable and prevents a favourable score in one dimension from
+compensating for a mandatory failure in another.
+
+The main contributions of this work are as follows.
+
+\begin{enumerate}[leftmargin=*,label=(\roman*)]
+
+  \item We formulate sensitive microservice placement as a legality-first
+  online scheduling problem that distinguishes mandatory policy feasibility
+  from temporal operational risk, selection fairness, and commit-time
+  resource executability.
+
+  \item We design \cage as an integrated decision pipeline that combines
+  deterministic policy gating, calibrated temporal-risk prediction,
+  fairness-aware candidate shortlisting, and an empirical Q95 pre-commit
+  guardrail. The ordering of these components ensures that prohibited nodes
+  never enter performance optimization and that predictive and
+  executability checks retain separate roles.
+
+  \item We develop a temporal node-risk model using recent utilization
+  levels, trends, ranges, and variability, together with an efficient
+  shortlisting mechanism that limits candidate evaluation while controlling
+  destination concentration.
+
+  \item We construct a temporally ordered trace-replay evaluation framework
+  from the Alibaba Microservices Trace 2021, including strict preprocessing,
+  calibration and test separation, natural and service-balanced workloads,
+  deterministic policy configurations, sensitivity analysis, ablation
+  studies, runtime evaluation, and paired timestamp-cluster statistical
+  comparisons.
+
+\end{enumerate}
+
+The remainder of the paper is organized as follows.
+Section~\ref{sec:related} reviews microservice scheduling, temporal resource
+management, and policy-aware edge orchestration.
+Section~\ref{sec:model} introduces the system model and formulates the
+scheduling problem.
+Section~\ref{sec:method} presents the design and operation of \cage.
+Section~\ref{sec:experimental} describes the dataset, replay protocol,
+baselines, and experimental settings.
+Section~\ref{sec:results} reports the evaluation results.
+Section~\ref{sec:discussion} discusses the design implications and practical
+trade-offs, and Section~\ref{sec:conclusion} concludes the paper.

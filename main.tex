@@ -1,0 +1,160 @@
+\documentclass[a4paper,fleqn]{cas-dc}
+
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+
+\usepackage[authoryear,longnamesfirst]{natbib}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs,multirow,tabularx,array}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{xspace}
+\usepackage{enumitem}
+\usepackage[ruled,vlined,linesnumbered]{algorithm2e}
+\usepackage{microtype}
+\usepackage{url}
+\usepackage{threeparttable}
+\usepackage{adjustbox}
+\usepackage{makecell}
+\usepackage{pifont}
+\usepackage{float}   % provides [H]
+\usepackage{capt-of} % provides \captionof for non-floating figures
+\usepackage{placeins}
+\usepackage{seqsplit}
+
+\graphicspath{{figures/}}
+\setlength{\emergencystretch}{2em}
+\newcommand{\cage}{\textsc{CAGE-S}\xspace}
+\newcommand{\TBD}[1]{\textcolor{orange!85!black}{\textbf{[TBD: #1]}}}
+\newcommand{\yes}{\ding{51}}
+\newcommand{\no}{\ding{55}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\N}{\mathcal{N}}
+\newcommand{\Sset}{\mathcal{S}}
+\newcommand{\Eset}{\mathcal{E}}
+\newcommand{\Lset}{\mathcal{L}}
+\newcommand{\Fset}{\mathcal{F}}
+\newcommand{\indicator}{\mathbb{I}}
+
+% Compile anonymously by default. Change the next line to \anonymizedfalse
+% after filling author_info.tex.
+\newif\ifanonymized
+\anonymizedtrue
+
+\begin{document}
+\let\WriteBookmarks\relax
+% --- Float tuning: reduce half-empty pages and keep figures close to text ---
+% Don’t vertically stretch pages to equal height (prevents ugly white gaps).
+\raggedbottom
+
+% Allow text+floats to share pages more aggressively.
+\renewcommand{\topfraction}{0.95}
+\renewcommand{\bottomfraction}{0.85}
+\renewcommand{\textfraction}{0.05}
+\renewcommand{\floatpagefraction}{0.8}
+\setcounter{topnumber}{2}
+\setcounter{bottomnumber}{2}
+\setcounter{totalnumber}{4}
+
+% CAS class uses these internal knobs; keep float-only pages from adding stretchy gaps.
+\def\floatpagepagefraction{.8}
+\def\textpagefraction{.05}
+\makeatletter
+\setlength{\@fptop}{0pt}
+\setlength{\@fpsep}{8pt}  % space between floats on float pages
+\setlength{\@fpbot}{0pt}
+\setlength{\floatsep}{8pt plus 2pt minus 2pt}
+\setlength{\textfloatsep}{10pt plus 2pt minus 2pt}
+\makeatother
+
+\shorttitle{Compliance-gated temporal-risk scheduling}
+\shortauthors{Anonymous author(s)}
+
+\title[mode=title]{CAGE-S: Compliance-Gated Online Scheduling with Temporal Risk Prediction and Pre-Commit Guardrails for Sensitive Edge--Cloud Microservices}
+
+\ifanonymized
+  \author[1]{Anonymous Author(s)}
+  \affiliation[1]{organization={Anonymous institution},country={Anonymous country}}
+\else
+  \input{author_info}
+\fi
+
+\begin{abstract}
+Sensitive Internet-of-Things applications execute as microservices across
+edge, fog, and cloud infrastructures whose nodes differ in capacity,
+jurisdiction, trust, encryption support, and hardware isolation. Scheduling
+in such environments must satisfy four requirements simultaneously:
+prohibited destinations must be excluded, near-term overload must be
+anticipated, repeated concentration on a few nodes must be avoided, and the
+final choice must retain sufficient resource headroom at commitment time.
+Existing approaches usually address performance optimization, policy
+enforcement, temporal prediction, or load distribution separately, leaving
+no unified decision process for sensitive microservice placement. This paper presents \cage, a compliance-gated online scheduler that assigns
+each requirement a distinct role in an ordered pipeline. Mandatory policies
+first define the admissible node set. A calibrated temporal model then
+estimates the risk of threshold crossing in the next control interval. A
+fairness-aware shortlist limits repeated selection of the same destinations,
+and an empirical Q95 guardrail verifies CPU and memory headroom immediately
+before commitment. This ordering prevents favourable performance scores from
+compensating for policy violations and separates predictive risk assessment
+from final executability checking. \cage is evaluated through temporally aligned replay on the Alibaba
+Microservices Trace 2021, covering 20,324 events and 12,727 nodes. The full
+scheduler satisfies all enforced policy, temporal-risk, and guardrail
+conditions, reduces migration relative to a matched current-state risk
+baseline, and maintains millisecond-scale decision latency. The results show
+that compliance, temporal awareness, fairness, and pre-commit verification
+can be integrated efficiently within a single online scheduling framework.
+\end{abstract}
+
+\begin{highlights}
+\item A legality-first scheduler unifies policy, temporal risk, fairness, and guardrails.
+\item Temporal history predicts unsafe next states better than current telemetry.
+\item Fair shortlisting preserves full-ranking quality with millisecond-scale overhead.
+\item All 462,480 seeded decisions satisfy policy, temporal-risk, and Q95 checks.
+\end{highlights}
+
+\begin{keywords}
+Edge--cloud computing \sep
+Microservice scheduling \sep
+Compliance-aware placement \sep
+Temporal risk prediction \sep
+Pre-commit guardrail \sep
+Trace-driven evaluation
+\end{keywords}
+
+\maketitle
+
+\input{sections/01_introduction}
+\input{sections/02_related_work}
+\input{sections/03_system_model}
+\input{sections/04_method}
+\input{sections/05_experimental_design}
+\input{sections/06_results}
+\input{sections/08_discussion}
+\input{sections/09_conclusion}
+
+
+\section*{Declaration of competing interest}
+
+The authors declare that they have no known competing financial
+interests or personal relationships that could have appeared to
+influence the work reported in this paper.
+
+\section*{Data and code availability}
+
+The Alibaba Microservices Trace 2021 used in this study is publicly
+available through the Alibaba Cluster Trace Program. The research
+artifact includes the preprocessing pipeline, temporal-risk model
+training, trace-replay implementation, baseline and ablation
+configurations, statistical analysis scripts, and figure-generation code. 
+\section*{Funding}
+
+This research did not receive any specific grant from funding agencies
+in the public, commercial, or not-for-profit sectors.
+
+
+\bibliographystyle{cas-model2-names}
+\bibliography{references}
+
+
+\end{document}

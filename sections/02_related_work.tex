@@ -1,0 +1,405 @@
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Performance- and network-aware microservice scheduling}
+
+A substantial body of research has addressed microservice placement and
+orchestration by optimizing communication cost, response time, throughput,
+or resource utilization. Rodrigues et al. formulated network-aware
+container scheduling as a multi-criteria optimization problem that jointly
+considers container requirements and network-level constraints
+\citep{rodrigues2020networkaware}. Their formulation demonstrates that
+placement decisions should account for communication requirements in
+addition to compute availability. However, it targets network-efficient
+container placement rather than online admission of sensitive services
+under policy and near-term operational-risk constraints. Wojciechowski et al. proposed NetMARKS, a Kubernetes scheduler that uses
+service-mesh telemetry to estimate communication between a pod awaiting
+placement and the pods already assigned to each node
+\citep{wojciechowski2021netmarks}. By favouring destinations that reduce
+cross-node service traffic, NetMARKS directly incorporates application
+communication into pod placement. Its scoring mechanism is nevertheless
+centred on traffic locality and does not distinguish policy-inadmissible
+nodes, predict next-interval node overload, or regulate repeated
+destination use. Shen et al. developed KaiS, a collaborative learning-based scheduling
+framework for Kubernetes-oriented edge--cloud networks
+\citep{shen2023kais}. KaiS combines coordinated multi-agent actor--critic
+learning for request dispatch with graph representation learning and
+multiple policy networks for service orchestration. Its two-timescale
+design jointly adapts request routing and service placement to improve
+long-term request-processing throughput. KaiS is an important example of
+learning-based orchestration over heterogeneous edge and cloud resources,
+but its learned policy optimizes performance over the available
+infrastructure rather than treating jurisdiction, trust, encryption, or
+hardware-isolation requirements as hard placement gates. Song et al. presented ChainsFormer for chain-latency-aware microservice
+resource provisioning \citep{song2023chainsformer}. The method identifies
+critical service chains and microservices and applies reinforcement
+learning to coordinate vertical and horizontal scaling. ChainsFormer
+therefore captures dependencies that are invisible to isolated
+microservice scaling. Its action space is resource provisioning and
+replica adjustment, whereas CAGE-S decides whether a current placement
+should be retained and which policy-admissible destination should be
+selected. Xiangchun Chen et al. proposed DTDRLMO, which combines digital twins and
+deep reinforcement learning for joint microservice offloading and
+bandwidth allocation in collaborative edge computing
+\citep{chen2023dtdrlmo}. Digital-twin models are used to anticipate changes
+in edge-node loads and network conditions, after which the learned policy
+selects offloading destinations to minimize average service-completion
+time. DTDRLMO is particularly relevant because it introduces predicted
+environment state into placement. It does not, however, formulate an
+explicit next-interval threshold-crossing probability, enforce
+service-specific policy admissibility, or apply destination-use fairness
+and a calibrated pre-commit headroom check. Ming Chen et al. introduced TraDE, a network- and traffic-aware adaptive
+scheduler that redeploys microservices when changing traffic and
+inter-node delays degrade application QoS \citep{chen2026trade}. TraDE
+constructs a bidirectional service-traffic representation and a node-delay
+matrix, and uses a parallel greedy mapper to determine a new deployment.
+It is one of the closest recent works in terms of dynamic microservice
+redeployment. Its scheduling signal is nevertheless derived mainly from
+service traffic, communication delay, load, and application performance.
+CAGE-S addresses a complementary decision problem in which service
+legality first defines the candidate space, and temporal node risk,
+historical destination use, and projected headroom determine the final
+placement within that space. Taken together, these methods provide sophisticated mechanisms for
+traffic-aware placement, adaptive offloading, resource provisioning, and
+learning-based orchestration. Their principal objective is to improve
+application performance or infrastructure efficiency. They do not
+explicitly organize hard policy admission, next-interval node-risk
+prediction, destination-use fairness, and commit-time resource
+verification as consecutive and non-interchangeable stages.
+
+\subsection{Telemetry-driven SLO and resource management}
+
+A second line of work uses runtime telemetry to identify performance
+degradation and adjust microservice resources. Qiu et al. developed FIRM,
+which combines fine-grained telemetry with machine learning to detect
+service-level objective violations, localize contended resources, and
+reprovision affected microservices \citep{qiu2020firm}. FIRM shows that
+microservice resource management benefits from interpreting application
+and infrastructure signals jointly. Its objective is corrective resource
+reallocation after identifying performance interference rather than
+policy-constrained destination selection. Gan et al. proposed Sage for diagnosing unpredictable performance in
+interactive cloud microservices \citep{gan2021sage}. Sage uses
+unsupervised learning and service-dependency information to identify the
+root causes of QoS violations and apply corrective actions. The method
+addresses the difficult problem of locating performance faults within a
+microservice graph. It does not define which nodes are legally admissible
+for a sensitive service or control the fairness of repeated placement
+decisions. Zhang et al. introduced Sinan, a data-driven QoS-aware cluster manager
+that models dependencies among microservice tiers and allocates resources
+to satisfy tail-latency targets \citep{zhang2021sinan}. Sinan demonstrates
+that instantaneous utilization alone is insufficient for managing
+end-to-end microservice performance and that historical traces can improve
+resource decisions. Its decisions concern per-tier resource allocation,
+not legality-first placement across nodes with heterogeneous governance
+and trust attributes. Fettes et al. developed Reclaimer, a deep-reinforcement-learning approach
+for dynamically assigning CPU cores to cloud microservices
+\citep{fettes2023reclaimer}. Reclaimer adapts to changes in the number and
+behaviour of microservices while seeking to reduce resource allocation
+without violating application QoS. This resource-allocation objective is
+different from CAGE-S, where the primary action is retaining or changing a
+service destination under hard admission conditions. Wen et al. proposed StatuScale, which detects workload status and combines
+vertical and horizontal scaling to respond to request spikes and bursts
+\citep{wen2024statuscale}. The status detector determines which scaling
+strategy should be activated, while a horizontal controller manages the
+number of service replicas. StatuScale is relevant to CAGE-S because both
+methods distinguish evolving resource behaviour from a single static
+snapshot. StatuScale uses this information to choose a scaling action;
+CAGE-S uses temporal node history to estimate next-interval destination
+risk before placement commitment. Hu et al. introduced LSRAM, a lightweight autoscaling and SLO resource
+allocation framework based on gradient descent
+\citep{hu2024lsram}. LSRAM rapidly allocates service-level resource
+budgets and updates its allocation model when workloads, applications, or
+cluster conditions change. Its lightweight adaptation reduces the cost of
+retraining complex resource models. However, it addresses resource
+allocation across a service chain rather than policy-aware node
+admissibility and destination ranking. These systems establish the importance of online telemetry, dependency
+structure, temporal context, and adaptive control. Their action spaces
+mainly involve diagnosis, reprovisioning, CPU allocation, or replica
+scaling. CAGE-S instead uses temporal information inside a node-placement
+pipeline: history estimates the probability of a destination crossing an
+operational boundary, while a separate Q95 check verifies projected CPU
+and memory headroom before commitment. This separation prevents the
+predictive model from serving simultaneously as both a risk estimator and
+an executability rule.
+
+\subsection{Fairness, policy, and trusted edge orchestration}
+
+Fairness has also been studied in edge scheduling, although usually at a
+different level from destination fairness. Madej et al. proposed
+client-fair, priority-fair, and hybrid scheduling policies for
+resource-constrained edge nodes \citep{madej2020fair}. Their work balances
+the allocation of edge execution opportunities among clients and job
+priorities. CAGE-S addresses a complementary form of fairness: it uses
+historical destination-selection counts to prevent repeated migrations
+from concentrating on a small set of nodes that consistently receive
+favourable operational scores. Pallewatta et al. developed a comprehensive taxonomy of microservice-based
+IoT application placement in edge and fog environments
+\citep{pallewatta2023taxonomy}. Their analysis identifies heterogeneity,
+application composition, placement dynamics, security, privacy, and
+evaluation methodology as central dimensions of the problem. The taxonomy
+also highlights that microservice placement is not determined by resource
+capacity alone, particularly when applications span multiple
+administrative and infrastructure domains. Pallewatta and Babar subsequently proposed a Policy-as-Code architecture
+for secure management of edge--cloud IoT microservices
+\citep{pallewatta2024policy}. Their framework uses Kubernetes, Istio, and
+Open Policy Agent to enforce security policies during initial placement,
+scaling, migration, and dynamic service composition. This work is the
+closest to CAGE-S in its treatment of security policy as an explicit
+control-plane concern. Its primary contribution is policy specification
+and enforcement; it does not rank policy-admissible nodes using calibrated
+next-interval operational risk, destination-use history, and an empirical
+resource guardrail. Thijsman et al. presented a remote-attestation architecture for enrolling
+and authorizing Kubernetes workers at the edge
+\citep{thijsman2024attested}. Their design uses hardware-rooted boot
+attestation and dynamically grants or revokes credentials and
+role-based-access-control privileges according to attestation events.
+This mechanism provides a strong foundation for determining whether an
+edge worker can be trusted. It does not itself decide which trusted worker
+is operationally preferable for a particular service. In CAGE-S,
+attestation or trusted-execution status can contribute to the policy mask,
+after which temporal risk, fairness, and pre-commit headroom determine the
+destination. The policy and trust literature therefore provides mechanisms for
+expressing mandatory requirements and establishing trustworthy cluster
+membership, while the fairness literature prevents inequitable access or
+allocation. CAGE-S connects these concerns at the scheduling-decision
+level: policy and trust determine admissibility, historical destination
+use controls concentration, and telemetry-derived risk determines
+operational suitability.
+
+\subsection{Positioning of CAGE-S}
+
+Table~\ref{tab:related-positioning} compares CAGE-S with the representative
+systems reviewed above. The comparison records only capabilities that are
+explicit components of each published method. General resource-capacity
+constraints, load penalties, or predicted environment states are not
+classified as a calibrated pre-commit guardrail or an explicit
+next-interval threshold-risk model.
+
+\begin{table*}[t]
+\centering
+\caption{Positioning of CAGE-S against representative related systems.
+``Explicit risk'' denotes prediction of next-interval node-threshold
+crossing, and ``pre-commit check'' denotes a separate resource-headroom
+verification immediately before placement commitment.}
+\label{tab:related-positioning}
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{adjustbox}{max width=\textwidth}
+\begin{tabular}{
+p{2.65cm}
+p{2.75cm}
+p{2.15cm}
+ccccc
+p{3.15cm}}
+\toprule
+System &
+Primary action &
+Dynamic information &
+Policy/
+trust gate &
+Explicit
+risk &
+Fair-use
+control &
+Pre-commit
+check &
+Online
+replacement &
+Primary objective \\
+\midrule
+
+Rodrigues et al.
+\citep{rodrigues2020networkaware} &
+Container placement &
+Network and container requirements &
+No &
+No &
+No &
+No &
+No &
+Multi-criteria network-aware placement \\
+
+NetMARKS
+\citep{wojciechowski2021netmarks} &
+Kubernetes pod placement &
+Service-mesh traffic &
+No &
+No &
+No &
+No &
+No &
+Inter-service traffic reduction \\
+
+KaiS
+\citep{shen2023kais} &
+Request dispatch and orchestration &
+Online system and graph state &
+No &
+No &
+No &
+No &
+Yes &
+Long-term request throughput \\
+
+ChainsFormer
+\citep{song2023chainsformer} &
+Vertical and horizontal scaling &
+Chain latency and workload state &
+No &
+No &
+No &
+No &
+No &
+Latency and resource efficiency \\
+
+DTDRLMO
+\citep{chen2023dtdrlmo} &
+Offloading and bandwidth allocation &
+Predicted node and network state &
+No &
+No &
+No &
+No &
+Yes &
+Average service-completion time \\
+
+TraDE
+\citep{chen2026trade} &
+Adaptive microservice redeployment &
+Traffic stress and node delay &
+No &
+No &
+Partial &
+No &
+Yes &
+Response time and goodput \\
+
+FIRM
+\citep{qiu2020firm} &
+Resource reprovisioning &
+Resource and application telemetry &
+No &
+No &
+No &
+No &
+No &
+SLO recovery and utilization \\
+
+Sage
+\citep{gan2021sage} &
+Diagnosis and corrective action &
+Traces and service dependencies &
+No &
+No &
+No &
+No &
+No &
+Root-cause detection and QoS recovery \\
+
+Sinan
+\citep{zhang2021sinan} &
+Per-tier resource allocation &
+Online traces and dependency state &
+No &
+No &
+No &
+No &
+No &
+Tail latency and resource efficiency \\
+
+Reclaimer
+\citep{fettes2023reclaimer} &
+Dynamic CPU allocation &
+Runtime microservice state &
+No &
+No &
+No &
+No &
+No &
+QoS with reduced CPU allocation \\
+
+StatuScale
+\citep{wen2024statuscale} &
+Vertical and horizontal scaling &
+Detected workload status &
+No &
+No &
+No &
+No &
+No &
+Burst-aware elastic scaling \\
+
+LSRAM
+\citep{hu2024lsram} &
+Autoscaling and SLO allocation &
+Adaptive cluster and workload state &
+No &
+No &
+No &
+No &
+No &
+QoS and resource efficiency \\
+
+Madej et al.
+\citep{madej2020fair} &
+Edge-job scheduling &
+Queue and job priorities &
+No &
+No &
+Yes &
+No &
+No &
+Client and priority fairness \\
+
+Policy-as-Code
+\citep{pallewatta2024policy} &
+Secure placement, scaling, and migration &
+Service and infrastructure policies &
+Yes &
+No &
+No &
+No &
+Yes &
+Security-policy enforcement \\
+
+Attested workers
+\citep{thijsman2024attested} &
+Worker enrollment and authorization &
+Hardware-attestation events &
+Yes &
+No &
+No &
+No &
+No &
+Trusted cluster membership \\
+
+\cage &
+Source retention or migration &
+Current and historical node telemetry &
+Yes &
+Yes &
+Yes &
+Yes &
+Yes &
+Compliance, temporal risk, fairness,
+and projected headroom \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\end{table*}
+
+Among the representative systems in
+Table~\ref{tab:related-positioning}, CAGE-S is the only scheduler that
+explicitly combines all four decision responsibilities considered in this
+work. First, a hard policy gate determines whether a node may host the
+service. Second, a calibrated temporal model estimates whether an
+admissible node is likely to cross the operational boundary during the
+next control interval. Third, historical destination use limits repeated
+placement concentration. Fourth, an independent Q95 guardrail verifies
+projected resource headroom before commitment. The distinction is therefore not merely the use of a different predictive
+model. CAGE-S changes the structure of the scheduling decision by assigning
+permission, near-term operational risk, distribution of repeated choices,
+and commit-time executability to separate ordered stages. This design
+prevents favourable performance scores from compensating for mandatory
+policy failures and prevents a predictive probability from replacing a
+direct pre-commit resource check.

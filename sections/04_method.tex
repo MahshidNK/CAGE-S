@@ -1,0 +1,587 @@
+\section{The CAGE-S Scheduler}
+\label{sec:method}
+
+\subsection{Method overview}
+
+CAGE-S is an online scheduling framework for sensitive microservices
+executing across heterogeneous edge, fog, and cloud nodes. Its design is
+based on the observation that compliance, operational risk, placement
+fairness, and resource executability are fundamentally different concerns.
+They should therefore not be represented as interchangeable terms in a
+single weighted objective.
+
+CAGE-S organizes the scheduling decision as an ordered sequence of
+admission and selection stages. The policy gate first determines which
+nodes are allowed to host the service. The temporal-risk model then
+estimates whether the currently admissible nodes are likely to cross the
+operational utilization boundary during the next control interval. A
+fairness-aware candidate reduction step limits repeated concentration on
+the same destinations. Finally, a calibrated Q95 guardrail verifies the
+projected CPU and memory headroom before the selected node is committed.
+
+The resulting decision path is
+
+\begin{equation}
+\label{eq:cage-decision-path}
+\text{policy gate}
+\rightarrow
+\text{temporal-risk estimation}
+\rightarrow
+\text{fair candidate reduction}
+\rightarrow
+\text{Q95 verification}
+\rightarrow
+\text{reservation and commitment}.
+\end{equation}
+
+This ordered structure is central to the method. Mandatory service
+requirements define the admissible action space before any predictive
+ranking is applied. Temporal risk is then used to distinguish stable
+candidates from nodes that are approaching an operational boundary.
+Selection history controls repeated destination use, while the final
+guardrail verifies that the chosen destination retains sufficient
+projected headroom at commitment time.
+
+CAGE-S always evaluates the current source before considering migration.
+A source that satisfies all admission conditions is retained. Migration
+is initiated only when the source violates at least one policy,
+temporal-risk, or guardrail condition. This source-first rule avoids
+unnecessary movement while applying the same admission requirements to
+retained and newly selected placements.
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=0.96\textwidth]
+    {cage_stages_only.pdf}
+    \caption{The ordered CAGE-S scheduling pipeline. A service event
+    passes through policy gating, temporal-risk estimation,
+    fairness-aware shortlisting, Q95 pre-commit verification, and
+    reservation-aware commitment.}
+    \label{fig:cage-stages}
+\end{figure*}
+
+\subsection{Policy-gated admissibility}
+
+For each service requirement profile, CAGE-S constructs a Boolean policy
+mask over the ordered node set. Let
+
+\begin{equation}
+\label{eq:policy-mask}
+    \mathbf{l}_{s}
+    =
+    \left[
+        L(s,n_1),
+        L(s,n_2),
+        \ldots,
+        L(s,n_M)
+    \right]
+    \in\{0,1\}^{M}
+\end{equation}
+
+denote the mask associated with service $s$, where the legality predicate
+$L(s,n)$ is defined in Eq.~\eqref{eq:legal}. The mask simultaneously
+encodes jurisdiction, trust, encryption, and trusted-execution
+requirements.
+
+Policy masks are independent of operational telemetry. They can therefore
+be reused across multiple scheduling events and recomputed only when a
+service requirement or node capability changes. For an event
+$e_{t,r}$, the mask lookup immediately partitions the infrastructure into
+admissible and prohibited destinations.
+
+The scheduler first evaluates the current source node $n_{t,r}$. The
+source can be retained only when
+
+\begin{equation}
+\label{eq:source-admission-method}
+\begin{split}
+    \operatorname{SourceOK}(e_{t,r})
+    ={}&
+    L(s_{t,r},n_{t,r})\\
+    &{}\land
+    \left(p_{n_{t,r},t}\leq\theta\right)\\
+    &{}\land
+    \left(g_{n_{t,r},t}\leq1\right).
+\end{split}
+\end{equation}
+
+When this condition holds, CAGE-S preserves the current placement. When
+it does not hold, the scheduler constructs the policy-admissible migration
+set
+
+\begin{equation}
+\label{eq:base-candidate-method}
+\begin{split}
+    \mathcal{B}_{t,r}
+    =
+    \big\{
+        n\in\N:
+        &\;L(s_{t,r},n)=1,\\
+        &\;n\notin A_t,\\
+        &\;U_{t,r}(n)<C
+    \big\}.
+\end{split}
+\end{equation}
+
+The active-source condition $n\notin A_t$ prevents a destination from
+coinciding with the source node of another event in the same control
+batch. The reservation condition $U_{t,r}(n)<C$ ensures that simultaneous
+decisions do not create conflicting commitments.
+
+Only nodes in $\mathcal{B}_{t,r}$ proceed to the predictive and ranking
+stages. Consequently, prohibited nodes are removed before temporal
+inference influences the final decision.
+
+\subsection{Temporal-risk estimation}
+
+After policy-admissible candidates have been identified, CAGE-S estimates
+their probability of crossing the operational utilization boundary during
+the next control interval. The risk estimator is a histogram
+gradient-boosting classifier
+
+\begin{equation}
+\label{eq:method-risk-model}
+    p_{n,t}
+    =
+    f_{\boldsymbol{\phi}}
+    \left(
+        \mathbf{h}_{n,t}
+    \right),
+\end{equation}
+
+where $\boldsymbol{\phi}$ denotes the learned model parameters and
+$\mathbf{h}_{n,t}\in\R^{22}$ represents the recent operational history of
+node $n$.
+
+The temporal representation combines five complementary types of
+information. Current-state features describe the observed CPU and memory
+levels at decision time. Lagged features retain the two preceding
+resource observations. Difference features encode recent direction and
+acceleration. Short-window statistics summarize local level, range, and
+stability. Projected-headroom features relate the current state to the
+operational boundary.
+
+The representation can be written as
+
+\begin{equation}
+\label{eq:temporal-feature-vector}
+\begin{split}
+    \mathbf{h}_{n,t}
+    =
+    \big[
+        &\mathbf{x}_{n,t},
+        \widehat{\mathbf{x}}^{\,\mathrm{up}}_{n,t+\Delta},
+        u_{n,t},
+        g_{n,t},\\
+        &\mathbf{x}_{n,t-\Delta},
+        \mathbf{x}_{n,t-2\Delta},\\
+        &\Delta\mathbf{x}_{n,t},
+        \Delta^{2}\mathbf{x}_{n,t},\\
+        &\overline{\mathbf{x}}^{(3)}_{n,t},
+        \operatorname{range}^{(3)}(\mathbf{x}_{n,t}),\\
+        &\operatorname{var}^{(2)}(\mathbf{x}_{n,t}),
+        \mathbf{q}_{n,t}
+    \big],
+\end{split}
+\end{equation}
+
+where $u_{n,t}$ denotes normalized joint utilization,
+$\mathbf{q}_{n,t}$ denotes CPU and memory headroom, and the remaining
+terms represent the temporal statistics.
+
+The temporal classifier produces one risk probability for each evaluated
+node. A node is operationally admissible when
+
+\begin{equation}
+\label{eq:temporal-admission-method}
+    p_{n,t}\leq\theta.
+\end{equation}
+
+CAGE-S performs feature construction and model inference at timestamp
+level. Rather than invoking the predictor separately for every event,
+the scheduler identifies the union of nodes required by the current event
+batch, constructs their temporal features once, and performs batched
+inference. The resulting risk vector is reused throughout all decisions
+at timestamp $t$.
+
+\begin{algorithm}[t]
+\caption{Timestamp-level temporal-state preparation}
+\label{alg:temporal-preparation}
+\KwIn{Node snapshots $X_t$, $X_{t-\Delta}$, and
+$X_{t-2\Delta}$; temporal model $f_{\boldsymbol{\phi}}$;
+calibrated margins $q_c^{0.95}$ and $q_m^{0.95}$}
+\KwOut{Risk probabilities $p_t$ and guardrail values $g_t$}
+
+\ForEach{$n\in\N$}{
+    Construct the temporal feature vector
+    $\mathbf{h}_{n,t}$\;
+    $p_{n,t}\leftarrow
+    f_{\boldsymbol{\phi}}(\mathbf{h}_{n,t})$\;
+    $\widehat c^{\,\mathrm{up}}_{n,t+\Delta}
+    \leftarrow c_{n,t}+q_c^{0.95}$\;
+    $\widehat m^{\,\mathrm{up}}_{n,t+\Delta}
+    \leftarrow m_{n,t}+q_m^{0.95}$\;
+    $g_{n,t}\leftarrow
+    \max\left\{
+    \widehat c^{\,\mathrm{up}}_{n,t+\Delta}/\rho_c,
+    \widehat m^{\,\mathrm{up}}_{n,t+\Delta}/\rho_m
+    \right\}$\;
+}
+\Return{$p_t,g_t$}\;
+\end{algorithm}
+
+\subsection{Fairness-aware candidate reduction}
+
+A large edge--cloud infrastructure may contain thousands of admissible
+nodes. Ranking every candidate for every event would increase decision
+cost and would not prevent repeated selection of the same destinations.
+CAGE-S therefore introduces a fairness-aware candidate reduction stage.
+
+Let $H_{t,r}(n)$ denote the cumulative number of earlier decisions
+assigned to node $n$ before event $e_{t,r}$. The count incorporates both
+previous timestamps and preceding events from the current timestamp. It
+therefore represents the placement pressure accumulated by each node.
+
+The policy-admissible candidates are ordered by
+
+\begin{equation}
+\label{eq:fair-preorder}
+    \left(
+        H_{t,r}(n),
+        g_{n,t},
+        \operatorname{id}(n)
+    \right).
+\end{equation}
+
+The first key favours nodes that have been selected less frequently. The
+second favours greater projected resource headroom among nodes with equal
+historical use. The fixed identifier guarantees deterministic ordering.
+
+The preliminary shortlist is defined as
+
+\begin{equation}
+\label{eq:method-shortlist}
+    K_{t,r}
+    =
+    \operatorname{First}_{k}
+    \left(
+        \operatorname{lexsort}_{n\in\mathcal{B}_{t,r}}
+        \left[
+            H_{t,r}(n),
+            g_{n,t},
+            \operatorname{id}(n)
+        \right]
+    \right),
+\end{equation}
+
+where $k$ denotes the maximum shortlist size. If
+$|\mathcal{B}_{t,r}|<k$, all policy-admissible candidates are retained.
+
+The shortlisted candidates are then screened using both temporal risk and
+projected headroom:
+
+\begin{equation}
+\label{eq:accepted-shortlist-method}
+    \mathcal{A}_{t,r}
+    =
+    \left\{
+        n\in K_{t,r}:
+        p_{n,t}\leq\theta
+        \land
+        g_{n,t}\leq1
+    \right\}.
+\end{equation}
+
+If the initial shortlist contains no accepted candidate, CAGE-S extends
+the same screening process to the remaining nodes in
+$\mathcal{B}_{t,r}\setminus K_{t,r}$. The shortlist therefore accelerates
+the common decision path while preserving the ability to identify any
+acceptable node in the complete policy-admissible set.
+
+\begin{algorithm}[t]
+\caption{Fairness-aware candidate shortlisting}
+\label{alg:fair-shortlisting}
+\KwIn{Base candidates $\mathcal{B}_{t,r}$;
+historical counts $H_{t,r}$; risk probabilities $p_t$;
+guardrails $g_t$; threshold $\theta$; shortlist size $k$}
+\KwOut{Accepted candidate set $\mathcal{A}_{t,r}$}
+
+Order $\mathcal{B}_{t,r}$ by
+$\left(H_{t,r}(n),g_{n,t},\operatorname{id}(n)\right)$\;
+$K_{t,r}\leftarrow$ first
+$\min(k,|\mathcal{B}_{t,r}|)$ candidates\;
+$\mathcal{A}_{t,r}\leftarrow
+\{n\in K_{t,r}:
+p_{n,t}\leq\theta
+\land g_{n,t}\leq1\}$\;
+
+\If{$\mathcal{A}_{t,r}=\varnothing$}{
+    $\mathcal{R}_{t,r}\leftarrow
+    \mathcal{B}_{t,r}\setminus K_{t,r}$\;
+    $\mathcal{A}_{t,r}\leftarrow
+    \{n\in\mathcal{R}_{t,r}:
+    p_{n,t}\leq\theta
+    \land g_{n,t}\leq1\}$\;
+}
+\Return{$\mathcal{A}_{t,r}$}\;
+\end{algorithm}
+
+\subsection{Destination ranking}
+
+After candidate screening, all nodes in $\mathcal{A}_{t,r}$ satisfy the
+mandatory policy, temporal-risk, guardrail, active-source, and reservation
+conditions. CAGE-S then selects the preferred destination through
+lexicographic ranking:
+
+\begin{equation}
+\label{eq:method-destination-ranking}
+    n^{*}_{t,r}
+    =
+    \operatorname*{lexmin}_{n\in\mathcal{A}_{t,r}}
+    \left(
+        H_{t,r}(n),
+        p_{n,t},
+        g_{n,t},
+        \operatorname{id}(n)
+    \right).
+\end{equation}
+
+Historical selection count remains the primary ranking criterion. Among
+nodes with equal historical use, the scheduler prefers the lower
+predicted temporal risk. Guardrail utilization then distinguishes nodes
+with different projected resource headroom, and the fixed node identifier
+resolves exact ties.
+
+Because mandatory admission has already been enforced, this ranking does
+not balance legal and illegal actions or executable and non-executable
+actions. It compares only destinations that have passed every required
+condition.
+
+\subsection{Q95 pre-commit guardrail}
+
+The temporal-risk model and the pre-commit guardrail perform complementary
+functions. The temporal model estimates the probability of near-term
+threshold crossing from recent operational dynamics. The guardrail
+provides a direct projected-headroom verification immediately before the
+destination is committed.
+
+For node $n$, the CPU and memory upper projections are
+
+\begin{align}
+\label{eq:method-cpu-upper}
+    \widehat c^{\,\mathrm{up}}_{n,t+\Delta}
+    &=
+    c_{n,t}+q_c^{0.95},\\
+\label{eq:method-memory-upper}
+    \widehat m^{\,\mathrm{up}}_{n,t+\Delta}
+    &=
+    m_{n,t}+q_m^{0.95}.
+\end{align}
+
+The normalized guardrail score is
+
+\begin{equation}
+\label{eq:method-guardrail}
+    g_{n,t}
+    =
+    \max
+    \left\{
+        \frac{
+        \widehat c^{\,\mathrm{up}}_{n,t+\Delta}
+        }{\rho_c},
+        \frac{
+        \widehat m^{\,\mathrm{up}}_{n,t+\Delta}
+        }{\rho_m}
+    \right\}.
+\end{equation}
+
+The candidate passes the guardrail when
+
+\begin{equation}
+\label{eq:method-guardrail-pass}
+    g_{n,t}\leq1.
+\end{equation}
+
+After the final destination has been selected, CAGE-S repeats the policy,
+temporal, guardrail, active-source, and reservation checks. The decision
+is committed only when the destination continues to satisfy all required
+conditions.
+
+\begin{algorithm}[t]
+\caption{Pre-commit destination verification}
+\label{alg:precommit-verification}
+\KwIn{Selected destination $n^{*}$; service $s$;
+risk $p_{n^{*},t}$; guardrail $g_{n^{*},t}$;
+active-source set $A_t$; reservations $U_{t,r}$;
+capacity $C$}
+\KwOut{Commit decision}
+
+$\textit{valid}\leftarrow
+L(s,n^{*})=1$\;
+$\textit{valid}\leftarrow
+\textit{valid}\land
+p_{n^{*},t}\leq\theta$\;
+$\textit{valid}\leftarrow
+\textit{valid}\land
+g_{n^{*},t}\leq1$\;
+$\textit{valid}\leftarrow
+\textit{valid}\land
+n^{*}\notin A_t$\;
+$\textit{valid}\leftarrow
+\textit{valid}\land
+U_{t,r}(n^{*})<C$\;
+
+\If{$\textit{valid}$}{
+    $U_{t,r}(n^{*})\leftarrow U_{t,r}(n^{*})+1$\;
+    Commit $n^{*}$\;
+}
+\end{algorithm}
+
+\subsection{Reservation-aware batch scheduling}
+
+Multiple events may arrive at the same control timestamp. CAGE-S processes
+them in a deterministic order and maintains a destination reservation
+counter for the batch.
+
+At the beginning of timestamp $t$, the scheduler initializes
+
+\begin{equation}
+    U_t(n)=0,
+    \qquad
+    \forall n\in\N.
+\end{equation}
+
+Whenever a migrated event is committed to node $n^{*}$, the counter is
+updated as
+
+\begin{equation}
+\label{eq:reservation-update-method}
+    U_{t,r+1}(n^{*})
+    =
+    U_{t,r}(n^{*})+1.
+\end{equation}
+
+All subsequent events in the same batch observe the updated value. The
+reservation mechanism therefore incorporates decisions made earlier in
+the timestamp before later events construct their own candidate sets.
+
+The historical count is updated in the same way:
+
+\begin{equation}
+\label{eq:history-update-method}
+    H_{t,r+1}(n^{*})
+    =
+    H_{t,r}(n^{*})+1.
+\end{equation}
+
+Reservation counts control concurrent destination use within the current
+timestamp, whereas historical counts regulate repeated selection across
+the complete scheduling horizon.
+
+\subsection{Complete scheduling algorithm}
+
+Algorithm~\ref{alg:cage-complete} presents the complete CAGE-S procedure.
+Temporal risks and guardrail values are prepared once for the current
+timestamp. Each event then follows the same source-retention, candidate
+construction, shortlisting, ranking, verification, and commitment path.
+
+\begin{algorithm*}[t]
+\caption{CAGE-S online scheduling at timestamp $t$}
+\label{alg:cage-complete}
+\KwIn{Ordered event batch $\Eset_t$; node snapshots
+$X_t,X_{t-\Delta},X_{t-2\Delta}$; policy masks
+$\{\mathbf{l}_s\}$; temporal model $f_{\boldsymbol{\phi}}$;
+threshold $\theta$; shortlist size $k$; destination capacity $C$}
+\KwOut{Placement decision $\pi(e)$ for each $e\in\Eset_t$}
+
+$(p_t,g_t)\leftarrow$
+Algorithm~\ref{alg:temporal-preparation}\;
+$A_t\leftarrow
+\{n_{t,r}:e_{t,r}\in\Eset_t\}$\;
+Initialize $U_t(n)\leftarrow0$ for all $n\in\N$\;
+
+\ForEach{$e_{t,r}=(i_{t,r},s_{t,r},n_{t,r},t)
+\in\Eset_t$ in deterministic order}{
+
+    $\textit{sourceOK}\leftarrow
+    L(s_{t,r},n_{t,r})
+    \land
+    p_{n_{t,r},t}\leq\theta
+    \land
+    g_{n_{t,r},t}\leq1$\;
+
+    \eIf{$\textit{sourceOK}$}{
+        $n^{*}\leftarrow n_{t,r}$\;
+    }{
+        $\mathcal{B}_{t,r}\leftarrow
+        \{n\in\N:
+        L(s_{t,r},n)=1,\,
+        n\notin A_t,\,
+        U_t(n)<C\}$\;
+
+        $\mathcal{A}_{t,r}\leftarrow$
+        Algorithm~\ref{alg:fair-shortlisting}
+        $(\mathcal{B}_{t,r},
+        H_{t,r},
+        p_t,
+        g_t,
+        \theta,
+        k)$\;
+
+        \If{$\mathcal{A}_{t,r}=\varnothing$}{
+            $\pi(e_{t,r})\leftarrow\varnothing$\;
+            \textbf{continue}\;
+        }
+
+        $n^{*}\leftarrow
+        \operatorname*{lexmin}_{n\in\mathcal{A}_{t,r}}
+        \left(
+            H_{t,r}(n),
+            p_{n,t},
+            g_{n,t},
+            \operatorname{id}(n)
+        \right)$\;
+
+        Verify $n^{*}$ using
+        Algorithm~\ref{alg:precommit-verification}\;
+    }
+
+    $\pi(e_{t,r})\leftarrow n^{*}$\;
+    $H_{t,r+1}(n^{*})
+    \leftarrow H_{t,r}(n^{*})+1$\;
+}
+\Return{$\{\pi(e):e\in\Eset_t\}$}\;
+\end{algorithm*}
+
+\subsection{Computational complexity}
+
+Let $M$ denote the number of infrastructure nodes, $B_t$ the number of
+events at timestamp $t$, $k$ the shortlist size, and $R_t$ the number of
+distinct nodes included in timestamp-level model inference. Temporal feature construction and risk inference require
+$O(R_t)$ time for a fixed feature dimension and a fixed trained ensemble.
+Policy gating is implemented as Boolean-array lookup. For each migrated
+event, constructing the base candidate set requires $O(M)$ operations.
+Fairness-aware top-$k$ selection can be performed in
+$O(M\log k)$ time, followed by at most $O(k)$ operations for final
+candidate ranking.
+
+The overall timestamp-level complexity is therefore
+
+\begin{equation}
+\label{eq:method-complexity}
+    O
+    \left(
+        R_t+
+        B_tM\log k
+    \right),
+\end{equation}
+
+where $k\ll M$. Policy masks require $O(PM)$ storage for $P$ distinct
+service-policy profiles. Risk vectors, guardrail vectors, historical
+counts, reservation counters, and timestamp-level node state require
+$O(M)$ additional memory. The implementation reduces repeated work by reusing policy masks,
+constructing temporal features once per timestamp, batching model
+inference, and expanding beyond the initial shortlist only when required.
+These mechanisms allow CAGE-S to preserve an explicit multi-stage
+decision process while remaining suitable for large online candidate
+sets.

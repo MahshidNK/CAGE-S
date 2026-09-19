@@ -1,0 +1,805 @@
+\section{Experimental Design}
+\label{sec:experimental}
+
+\subsection{Evaluation objectives}
+
+The evaluation is designed to examine the complete CAGE-S decision
+pipeline rather than only the predictive model. In particular, the
+experiments address the questions summarized in
+Table~\ref{tab:research-questions}.
+
+\begin{table*}[t]
+\centering
+\caption{Research questions guiding the experimental evaluation.}
+\label{tab:research-questions}
+\begin{tabularx}{\textwidth}{lX}
+\toprule
+Question & Evaluation objective \\
+\midrule
+RQ1 &
+Can recent temporal telemetry predict next-interval node risk more
+accurately and more reliably than current-state telemetry alone? \\
+
+RQ2 &
+How does the complete scheduler compare with random, least-loaded,
+deterministic-guardrail, current-state learning, policy-only, and
+component-ablated alternatives under an identical replay protocol? \\
+
+RQ3 &
+Does fairness-aware shortlisting control destination concentration
+without changing the operational quality of the selected placements? \\
+
+RQ4 &
+How robust are the decisions to service-frequency imbalance, policy
+assignment, shortlist size, risk operating point, and destination
+reservation capacity? \\
+
+RQ5 &
+Can the complete feature-construction, inference, filtering, ranking,
+and reservation path execute within an online control interval for a
+large candidate set? \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+\subsection{Source trace and integrity checks}
+
+The evaluation uses the public Alibaba Microservices Trace 2021
+\citep{luo2021alibaba}. The trace contains node-level telemetry and
+microservice-instance resource signals sampled at 30-second intervals.
+We process the complete \texttt{Node\_0} archive together with the
+\texttt{MSResource\_0} shard.
+
+The raw node archive contains 18,868,400 records, 13,118 nodes, and
+1,440 timestamps covering a 12-hour observation period. Each
+node--timestamp pair is unique. The raw archive contains 2,882 missing
+CPU values and 1,440 missing memory values. Rather than interpolating
+incomplete node trajectories, strict cleaning retains only nodes with a
+complete sequence of CPU and memory observations. The resulting strict
+node trace contains 18,803,520 records for 13,058 nodes, with no missing
+values or duplicate node--timestamp pairs. The raw microservice shard contains 11,564,394 records, 1,303 services,
+96,380 service--instance pairs, 12,731 nodes, and 120 timestamps. A
+total of 1,080 records with missing instance CPU or memory originate
+from nine service instances. These instances are removed. The remaining
+records are aligned with nodes that are valid within the local
+microservice-shard interval. The clean microservice trace contains
+11,561,072 records, 96,346 service--instance pairs, and 12,727 nodes.
+Twenty-two service--instance pairs that enter after the first timestamp
+are retained from their first valid observation onward. The node trace is then restricted to the 12,727 nodes and 120 timestamps
+represented in the clean microservice shard. This produces an aligned
+node table of 1,527,240 records, equal to
+$12{,}727\times120$, with no missing observations or duplicate keys.
+No CPU or memory value is clipped or imputed during preprocessing.
+
+Table~\ref{tab:data-preparation} summarizes the resulting datasets.
+
+\begin{table*}[t]
+\centering
+\caption{Trace preparation and replay datasets.}
+\label{tab:data-preparation}
+\begin{adjustbox}{max width=\textwidth}
+\begin{tabular}{lrrrrr}
+\toprule
+Dataset &
+Records/events &
+Nodes &
+Services &
+Service--instance pairs &
+Timestamps \\
+\midrule
+Raw \texttt{Node\_0} &
+18,868,400 &
+13,118 &
+-- &
+-- &
+1,440 \\
+
+Strict node trace &
+18,803,520 &
+13,058 &
+-- &
+-- &
+1,440 \\
+
+Raw \texttt{MSResource\_0} &
+11,564,394 &
+12,731 &
+1,303 &
+96,380 &
+120 \\
+
+Clean aligned \texttt{MSResource\_0} &
+11,561,072 &
+12,727 &
+1,303 &
+96,346 &
+120 \\
+
+Aligned node snapshots &
+1,527,240 &
+12,727 &
+-- &
+-- &
+120 \\
+
+Natural evaluable event pool &
+20,324 &
+12,727 &
+368 &
+-- &
+108 \\
+
+Service-balanced evaluable pool &
+6,875 &
+12,727 &
+294/285\tnote{a} &
+-- &
+108 \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+
+\begin{tablenotes}
+\footnotesize
+\item[a] Number of represented services in the calibration/test
+partitions, respectively.
+\end{tablenotes}
+\end{table*}
+
+Instance-level CPU and memory values are used only to identify changes
+in service-instance activity. Node admission, temporal prediction, and
+guardrail computation use the corresponding node-level telemetry.
+This separation ensures that instance signals are not interpreted as an
+absolute accounting of node capacity.
+
+\subsection{Replay-event construction}
+
+Almost all service instances are already active at the beginning of the
+microservice shard: 96,341 of the 96,346 clean service--instance pairs
+appear at the first timestamp. Native service arrivals are therefore too
+rare to provide a sufficiently large online scheduling workload. We construct decision events from positive instance-level CPU bursts.
+Let $v^{c}_{i,t}$ denote the CPU signal of service instance $i$ at
+timestamp $t$. The one-step change is
+
+\begin{equation}
+\label{eq:event-cpu-change}
+    \Delta v^{c}_{i,t}
+    =
+    v^{c}_{i,t}
+    -
+    v^{c}_{i,t-\Delta},
+\end{equation}
+
+where $\Delta=30$ seconds. After an initial 300-second warm-up, an event
+is emitted when
+
+\begin{equation}
+\label{eq:event-rule}
+    \Delta v^{c}_{i,t}>0.05.
+\end{equation}
+
+The event threshold is applied identically to every service instance and
+is fixed before model fitting and scheduler comparison. The warm-up
+ensures that temporal histories are available before events enter the
+replay.
+
+The initial rule produces 20,419 events over 109 timestamps. Events at
+the final timestamp cannot be paired with a subsequent node observation
+at $t+\Delta$ and are therefore excluded from evaluable replay. The
+final natural event pool contains 20,324 events over 108 timestamps,
+representing 368 services and 4,939 observed source nodes.
+
+For each event, the stored replay record contains the service,
+service-instance identifier, source node, timestamp, previous and current
+instance signals, the instance-level CPU change, and the source-node
+state available at the decision timestamp.
+
+\subsection{Temporal alignment and information boundary}
+
+Figure~\ref{fig:timeline} illustrates the temporal protocol. An event is
+identified from the service-instance change ending at timestamp $t$.
+The scheduler observes the node snapshot at $t$ and temporal features
+constructed only from $t$, $t-\Delta$, and $t-2\Delta$. The selected
+node's recorded state at $t+\Delta$ is used to compute the native
+next-state evaluation metrics.
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=0.88\textwidth]{temporal_protocol.pdf}
+  \caption{Temporally ordered replay protocol. Event detection ends at
+  timestamp $t$; scheduling uses only the current and preceding
+  observations; evaluation uses the selected node state at
+  $t+\Delta$, where $\Delta=30$ seconds.}
+  \label{fig:timeline}
+\end{figure*}
+
+The following information boundary is enforced throughout all model and
+scheduler experiments:
+
+\begin{equation}
+\label{eq:information-boundary}
+    \mathcal{I}_{t}
+    =
+    \left\{
+        X_{\tau},
+        \text{event data}_{\tau}
+        :
+        \tau\leq t
+    \right\}.
+\end{equation}
+
+No feature available to a decision at $t$ is constructed from
+$t+\Delta$ or any later timestamp. Training labels, calibration
+residuals, probability thresholds, shortlist settings, and guardrail
+margins are fixed without using the final test region.
+
+\subsection{Natural and service-balanced workloads}
+
+The natural event pool preserves the service frequency distribution
+produced by the burst rule. Its event frequency is concentrated: the
+ten most frequent services account for approximately 46\% of events.
+This workload is used as the primary evaluation because it retains the
+observed service imbalance.
+
+To verify that the conclusions are not dominated by a small number of
+high-frequency services, we construct a service-balanced workload.
+Within each service and timestamp, at most two events are retained:
+
+\begin{equation}
+\label{eq:balanced-cap}
+    \left|
+        \left\{
+        e\in\Eset_t:s_e=s
+        \right\}
+    \right|
+    \leq2.
+\end{equation}
+
+Selection under this rule is deterministic. The resulting balanced pool
+contains 6,875 evaluable events. Its test partition contains 3,787 events,
+and the top-ten service share decreases to 22.55\%. The value two in this
+workload-construction rule is unrelated to the destination reservation
+capacity $C$ used by the scheduler.
+
+\subsection{Chronological development, validation, and test partitions}
+
+The replay interval is split chronologically at timestamp
+
+\begin{equation}
+    t_{\mathrm{split}}=1{,}800{,}000~\mathrm{ms}.
+\end{equation}
+
+Node transitions before the split form the pre-test region, and
+transitions after the split form the final test region. The aligned
+temporal-risk dataset contains 1,374,516 node transitions:
+
+\begin{table}[t]
+\centering
+\caption{Chronological partitions used for model development and final
+evaluation.}
+\label{tab:partitions}
+\begin{tabular}{lrr}
+\toprule
+Partition & Node transitions & Replay events \\
+\midrule
+Development & 432,718 & -- \\
+Validation & 190,905 & -- \\
+Calibration total & 623,623 & 8,695 \\
+Final test & 750,893 & 11,629 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The development and validation partitions are contained entirely within
+the pre-test region. Model fitting is performed on development data.
+Estimator selection and operating-point selection use validation or
+calibration data. The final test transitions and test replay events are
+accessed only after the model, thresholds, margins, and scheduling
+configuration are frozen.
+
+For the service-balanced workload, the corresponding calibration and
+test event counts are 3,088 and 3,787, respectively. Both natural and
+balanced test workloads contain the same 59 decision timestamps.
+
+\subsection{Temporal-risk model development}
+
+The primary risk estimator is a histogram gradient-boosting classifier
+implemented with scikit-learn \citep{pedregosa2011sklearn}. Its input is
+the 22-dimensional temporal feature vector defined in
+Section~\ref{sec:method} and Appendix~\ref{app:features}. The exact
+feature order is fixed for training, serialization, and online inference.
+
+A current-state histogram gradient-boosting model is trained as the
+direct predictive ablation. It receives current node telemetry and
+current-state resource features but excludes temporal lags, differences,
+ranges, and variation. Both models use the same development,
+validation, and final-test partitions.
+
+Model selection is based on complementary discrimination and probability
+quality measures: ROC-AUC, PR-AUC, Brier score, log loss, and expected
+calibration error. Scheduler-level thresholds are not selected by
+maximizing test performance. Instead, thresholds are determined from
+the calibration region at matched operating points.
+
+The default temporal-risk threshold is
+
+\begin{equation}
+\label{eq:default-temporal-threshold}
+    \theta_{\mathrm{temp}}
+    =
+    0.011362695354780319.
+\end{equation}
+
+The matched current-state HGB threshold is
+
+\begin{equation}
+\label{eq:current-hgb-threshold}
+    \theta_{\mathrm{current}}
+    =
+    0.004292615073088162.
+\end{equation}
+
+A stricter temporal operating point,
+
+\begin{equation}
+    \theta_{\mathrm{safety}}
+    =
+    0.0020594307448572016,
+\end{equation}
+
+is retained for sensitivity analysis. Once selected, these thresholds
+remain fixed across workloads and policy seeds.
+
+\subsection{Q95 guardrail calibration}
+
+The persistence baseline predicts that the next node state equals the
+current state. For each calibration transition, CPU and memory residuals
+are computed as
+
+\begin{align}
+    r^{c}_{n,t}
+    &=
+    \left|
+    c_{n,t+\Delta}-c_{n,t}
+    \right|,\\
+    r^{m}_{n,t}
+    &=
+    \left|
+    m_{n,t+\Delta}-m_{n,t}
+    \right|.
+\end{align}
+
+The 95th-percentile residual margins computed exclusively from calibration
+transitions are
+
+\begin{equation}
+\label{eq:q95-values}
+    q_c^{0.95}
+    =
+    0.025929729975254,
+    \qquad
+    q_m^{0.95}
+    =
+    0.00021962105567108203.
+\end{equation}
+
+These fixed margins are used to construct the CPU and memory upper
+projections in Eq.~\eqref{eq:guardrail}. The default operational
+boundaries are
+
+\begin{equation}
+    \rho_c=\rho_m=0.8.
+\end{equation}
+
+The principal guardrail accepts a node when $g_{n,t}\leq1$. Additional
+cutoffs of $0.99$ and $0.975$ are evaluated as deterministic sensitivity
+profiles.
+
+\subsection{Policy-overlay construction}
+\label{sec:policyoverlay}
+
+The trace contains operational telemetry but no jurisdiction, trust,
+encryption, trusted-execution, or service-sensitivity attributes.
+CAGE-S therefore uses a deterministic policy overlay to evaluate the
+policy semantics of the scheduler.
+
+Node identifiers are mapped through a stable cryptographic hash to one
+of four jurisdictions---EU-West, EU-Central, US-East, and
+AP-Southeast---one of three ordered trust levels, and Boolean encryption
+and trusted-execution capabilities. Service identifiers are independently
+mapped to one of six policy classes. Hashing depends only on the
+identifier and policy seed; it does not use resource telemetry, event
+frequency, source placement, model predictions, or future node states.
+
+Table~\ref{tab:policyclasses} reports the number of legal nodes for each
+class under the reference seed.
+
+\begin{table}[t]
+\centering
+\caption{Policy classes and legal-node counts under the reference policy
+seed.}
+\label{tab:policyclasses}
+\begin{tabular}{lr}
+\toprule
+Service policy class & Legal nodes \\
+\midrule
+Global public & 12,727 \\
+Global protected & 10,320 \\
+EU restricted & 6,206 \\
+US restricted & 2,613 \\
+APAC restricted & 1,501 \\
+EU confidential & 866 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The complete replay is repeated over 30 deterministic policy seeds.
+Changing the seed modifies both service requirements and node
+capabilities while leaving the event sequence, telemetry, temporal model,
+thresholds, guardrail margins, and scheduling implementation unchanged.
+This design isolates sensitivity to policy composition.
+
+\subsection{Compared scheduling methods}
+
+All methods receive identical event batches, timestamp ordering, node
+snapshots, active-source sets, destination-capacity rules, and fixed
+tie-breaking identifiers. Methods that use policy information receive
+the same policy overlay. Except for the observed-source baseline, each
+method first retains a source that satisfies its own admission rule and
+invokes destination selection only when that source fails.
+
+Table~\ref{tab:compared-methods} defines the complete comparison set.
+
+\begin{table*}[t]
+\centering
+\caption{Compared methods and enabled scheduling components.}
+\label{tab:compared-methods}
+\begin{adjustbox}{max width=\textwidth}
+\begin{tabular}{lcccccl}
+\toprule
+Method &
+Policy &
+Temporal model &
+Q95 check &
+Fairness &
+Reservation &
+Destination rule \\
+\midrule
+Observed source &
+\no & \no & \no & \no & \no &
+Retain native source \\
+
+Random-policy-Q95 &
+\yes & \no & \yes & \no & \yes &
+Uniform random accepted destination \\
+
+Least-loaded-policy-Q95 &
+\yes & \no & \yes & \no & \yes &
+Minimum current utilization \\
+
+Policy-only-fair &
+\yes & \no & \no & \yes & \yes &
+Fair shortlist; current-state ranking \\
+
+Policy-Q95-fair &
+\yes & \no & \yes & \yes & \yes &
+Fair shortlist; guardrail ranking \\
+
+Policy-boundary-0.99 &
+\yes & \no & \yes & \yes & \yes &
+Guardrail cutoff $0.99$ \\
+
+Policy-current-HGB-Q95 &
+\yes & Current only & \yes & \yes & \yes &
+Current-state learned risk \\
+
+Temporal-Q95-no-policy &
+\no & Temporal & \yes & \yes & \yes &
+Temporal risk without policy gating \\
+
+Policy-temporal-no-projection &
+\yes & Temporal & \no & \yes & \yes &
+CAGE-S without final Q95 projection \\
+
+CAGE-S &
+\yes & Temporal & \yes & \yes & \yes &
+Complete lexicographic pipeline \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\end{table*}
+
+The random baseline is evaluated over 20 deterministic replicates. Its
+random seed is derived from the workload and replicate identifier, making
+every run reproducible. All other methods are deterministic.
+
+\subsection{Parameter selection and sensitivity matrix}
+
+Table~\ref{tab:experimental-parameters} lists the principal experimental
+parameters, their default values, and the data used for their selection.
+No parameter is tuned on the final test workload.
+
+\begin{table*}[t]
+\centering
+\caption{Experimental parameters and selection protocol.}
+\label{tab:experimental-parameters}
+\begin{tabularx}{\textwidth}{lclX}
+\toprule
+Parameter & Symbol & Value(s) & Selection source \\
+\midrule
+Control interval &
+$\Delta$ &
+30~s &
+Native sampling interval of the trace \\
+
+Warm-up duration &
+-- &
+300~s &
+Ensures availability of temporal history \\
+
+Event CPU-change threshold &
+-- &
+$0.05$ &
+Fixed burst rule used across all splits and methods \\
+
+CPU/memory boundary &
+$\rho_c,\rho_m$ &
+$0.8,0.8$ &
+Operational headroom boundary \\
+
+Temporal threshold &
+$\theta_{\mathrm{temp}}$ &
+$0.011362695354780319$ &
+Calibration-side matched-availability operating point \\
+
+Current-HGB threshold &
+$\theta_{\mathrm{current}}$ &
+$0.004292615073088162$ &
+Matched operating point for direct model comparison \\
+
+Strict temporal threshold &
+$\theta_{\mathrm{safety}}$ &
+$0.0020594307448572016$ &
+Calibration-side safety sensitivity profile \\
+
+CPU Q95 margin &
+$q_c^{0.95}$ &
+$0.025929729975254$ &
+95th percentile of calibration residuals \\
+
+Memory Q95 margin &
+$q_m^{0.95}$ &
+$0.00021962105567108203$ &
+95th percentile of calibration residuals \\
+
+Shortlist size &
+$k$ &
+256 &
+Validation comparison with
+$\{128,256,512,1024,2048,\text{full}\}$ \\
+
+Destination capacity &
+$C$ &
+1 &
+Observed event-concurrency audit; $C=2$ used for sensitivity \\
+
+Policy seeds &
+-- &
+30 &
+Overlay-composition robustness \\
+
+Random replicates &
+-- &
+20 &
+Random-baseline variability \\
+
+Bootstrap replicates &
+-- &
+20,000 &
+Timestamp-cluster uncertainty estimation \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+Sensitivity analysis varies one controlled factor at a time while holding
+the event sequence and all remaining settings fixed. The examined factors
+are workload composition, temporal operating point, deterministic
+guardrail cutoff, shortlist size, fairness-aware versus score-only
+ranking, destination capacity, and policy seed.
+
+\subsection{Evaluation metrics}
+
+All event-level metrics are computed from the final selected node,
+including retained sources and migrated destinations. Let
+$n^{*}_{e}$ denote the selected node for event $e$, and let $n_e$ denote
+its observed source. Table~\ref{tab:metrics} defines the principal
+metrics.
+
+\begin{table*}[t]
+\centering
+\caption{Evaluation metrics. Lower is better unless stated otherwise.}
+\label{tab:metrics}
+\begin{tabularx}{\textwidth}{lXc}
+\toprule
+Metric & Definition & Preferred direction \\
+\midrule
+Migration rate &
+$\frac{1}{|\Eset|}
+\sum_{e\in\Eset}
+\indicator[n^{*}_{e}\neq n_e]$ &
+Lower \\
+
+Policy-violation rate &
+$\frac{1}{|\Eset|}
+\sum_{e\in\Eset}
+\indicator[L(s_e,n^{*}_{e})=0]$ &
+Lower \\
+
+Temporal-threshold violation &
+$\frac{1}{|\Eset|}
+\sum_{e\in\Eset}
+\indicator[p_{n^{*}_{e},t_e}>\theta]$ &
+Lower \\
+
+Q95-violation rate &
+$\frac{1}{|\Eset|}
+\sum_{e\in\Eset}
+\indicator[g_{n^{*}_{e},t_e}>1]$ &
+Lower \\
+
+Native next-state unsafe rate &
+$\frac{1}{|\Eset|}
+\sum_{e\in\Eset}
+y_{n^{*}_{e},t_e+\Delta}$ &
+Lower \\
+
+Fallback rate &
+Fraction of events that require expansion beyond the initial shortlist &
+Lower \\
+
+Infeasible-event rate &
+Fraction of events for which no admissible destination can be committed &
+Lower \\
+
+Unique destinations &
+Number of distinct selected destination nodes &
+Higher \\
+
+Top-ten destination share &
+Fraction of migrated assignments received by the ten most-used
+destinations &
+Lower \\
+
+Jain destination fairness &
+Distributional fairness of migrated assignments across all $M$ nodes &
+Higher \\
+
+Decision latency &
+Elapsed online-core processing time per timestamp, reported in ms &
+Lower \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+Let $z_n$ denote the number of migrated events assigned to node $n$.
+Jain's fairness index is computed over the full node set, including nodes
+with zero assignments:
+
+\begin{equation}
+\label{eq:jain}
+    J
+    =
+    \frac{
+        \left(
+        \sum_{n=1}^{M}z_n
+        \right)^2
+    }{
+        M
+        \sum_{n=1}^{M}z_n^2
+    }.
+\end{equation}
+
+This definition penalizes concentration on a small subset of the
+available infrastructure. In addition to Jain fairness, we report the
+top-one and top-ten destination shares and the number of unique
+destinations.
+
+\subsection{Statistical analysis}
+
+Events at the same timestamp share a node snapshot, candidate state, and
+reservation context and are therefore not treated as independent
+observations. Uncertainty for event-level comparisons is estimated using
+a paired timestamp-cluster bootstrap. For each workload, the 59 test timestamps are sampled with replacement.
+Whenever a timestamp is selected, all events associated with that
+timestamp are retained together. The same sampled timestamps are applied
+to CAGE-S and the corresponding baseline, preserving pairing. For the
+random baseline, replicate identity is additionally sampled inside each
+bootstrap iteration.
+
+We generate 20,000 bootstrap samples. For each metric, the reported
+effect is
+
+\begin{equation}
+\label{eq:bootstrap-difference}
+    \Delta_{\mathrm{metric}}
+    =
+    \mathrm{metric}_{\mathrm{CAGE\text{-}S}}
+    -
+    \mathrm{metric}_{\mathrm{baseline}}.
+\end{equation}
+
+Percentile 95\% confidence intervals are obtained from the
+$2.5$th and $97.5$th percentiles of the paired bootstrap distribution.
+For metrics where lower values are preferred, a confidence interval
+entirely below zero supports a lower value for CAGE-S. For fairness
+metrics, the interpretation is reversed.
+
+Policy-seed robustness is summarized separately across the 30
+deterministic overlays using the mean, median, and 5th and 95th
+percentiles. Random-baseline variability is summarized across its 20
+replicates.
+
+\subsection{Runtime measurement}
+
+The online-core benchmark measures the complete decision computation
+after the required node snapshots are available in memory. The measured
+path includes:
+
+\begin{equation}
+\begin{split}
+\text{online core}={}&
+\text{22-feature construction}
++\text{source inference}\\
+&+\text{policy filtering}
++\text{fair shortlisting}\\
+&+\text{destination inference}
++\text{ranking}\\
+&+\text{reservation}
++\text{pre-commit verification}.
+\end{split}
+\end{equation}
+
+Risk inference is performed on the timestamp-level superset required by
+the event batch. Consequently, the benchmark includes both feature
+construction and all model calls needed for the actual decisions rather
+than timing a single isolated prediction.
+
+A latency observation is recorded for every test timestamp. We report
+the mean, median, 95th percentile, 99th percentile, and maximum elapsed
+time. Telemetry acquisition, file and network I/O, serialization, and
+external orchestration actions are outside the measured online core.
+
+\subsection{Implementation and reproducibility}
+
+Preprocessing and replay are implemented in Python 3.12.3. The principal
+software versions are reported in Table~\ref{tab:software-environment}.
+
+\begin{table}[t]
+\centering
+\caption{Software environment.}
+\label{tab:software-environment}
+\begin{tabular}{ll}
+\toprule
+Component & Version \\
+\midrule
+Operating system & Ubuntu 24.04.4 LTS under WSL2 \\
+WSL2 kernel & 6.18.33.2-microsoft-standard-WSL2 \\
+Python & 3.12.3 \\
+Polars & 1.42.1 \\
+PyArrow & 25.0.0 \\
+DuckDB & 1.5.4 \\
+pandas & 3.0.3 \\
+NumPy & 2.5.1 \\
+SciPy & 1.18.0 \\
+scikit-learn & 1.9.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Experiments are executed on a Dell Precision 3561 workstation. The
+feature order, model artifact, policy seeds, random seeds, event ordering,
+thresholds, and candidate tie-breaking rule are fixed. Intermediate
+tables are stored as sorted Parquet files with explicit schemas, and
+principal generated artifacts are accompanied by SHA-256 checksums.
+All reported scheduler comparisons are produced from the same immutable
+test event files and node snapshots.

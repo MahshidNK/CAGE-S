@@ -1,0 +1,28 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+This paper presented \cage, a compliance-gated online scheduler for
+sensitive microservices deployed across heterogeneous edge, fog, and
+cloud nodes. CAGE-S organizes placement as an ordered decision process
+in which policy admissibility, temporal operational risk,
+fairness-aware candidate selection, and pre-commit resource verification
+serve distinct and complementary roles. Mandatory requirements first
+define the legal candidate space, temporal history identifies nodes
+approaching an operational boundary, fair shortlisting limits repeated
+destination concentration, and the Q95 guardrail verifies projected CPU
+and memory headroom before commitment. The evaluation on the Alibaba Microservices Trace 2021 shows that
+temporal node history improves both predictive quality and scheduler-level
+decisions compared with current-state telemetry alone. On the natural
+test workload, CAGE-S satisfies all enforced policy, temporal-risk, and
+Q95 conditions with a 39.12\% migration rate and a 0.043\% next-state
+unsafe rate. The service-balanced workload exhibits the same overall
+behaviour. Robustness experiments over 30 deterministic policy overlays
+and 462,480 decisions produce no policy violations, temporal-threshold
+violations, guardrail violations, destination conflicts, or fallbacks.
+The complete online decision core also remains well within the
+30-second control interval. Overall, the results demonstrate that compliance, temporal prediction,
+placement fairness, and commit-time verification can be integrated into
+a single efficient scheduling pipeline. By keeping mandatory constraints
+separate from optimization preferences, CAGE-S provides an interpretable
+and practical foundation for scheduling sensitive microservices across
+large edge--cloud infrastructures.
